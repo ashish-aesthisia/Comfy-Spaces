@@ -19,7 +19,7 @@ interface Node {
   disabled?: boolean;
 }
 
-interface RevisionInfo {
+interface SpaceInfo {
   name: string;
   pythonVersion: string;
   lastUpdated: string;
@@ -43,7 +43,7 @@ interface Model {
 
 export default function ActivePage() {
   const [selectedVersion, setSelectedVersion] = useState<string>('');
-  const [revisions, setRevisions] = useState<RevisionInfo[]>([]);
+  const [spaces, setSpaces] = useState<SpaceInfo[]>([]);
   const [nodes, setNodes] = useState<Node[]>([]);
   const [dependencies, setDependencies] = useState<Dependency[]>([]);
   const [dependenciesExpanded, setDependenciesExpanded] = useState(false);
@@ -56,8 +56,8 @@ export default function ActivePage() {
   const [changesModalOpened, setChangesModalOpened] = useState(false);
   const [changesDiff, setChangesDiff] = useState<any>(null);
   const [loadingChanges, setLoadingChanges] = useState(false);
-  const [creatingRevision, setCreatingRevision] = useState(false);
-  const [nextRevisionName, setNextRevisionName] = useState<string>('');
+  const [creatingSpace, setCreatingSpace] = useState(false);
+  const [nextSpaceName, setNextSpaceName] = useState<string>('');
   const [logsSidebarOpen, setLogsSidebarOpen] = useState(false);
   const router = useRouter();
 
@@ -127,13 +127,13 @@ export default function ActivePage() {
     setLoadingChanges(true);
     setChangesModalOpened(true);
     try {
-      const [diffResponse, revisionsResponse] = await Promise.all([
+      const [diffResponse, spacesResponse] = await Promise.all([
         fetch('/api/requirements/diff'),
-        fetch('/api/revisions')
+        fetch('/api/spaces')
       ]);
       
       const diffData = await diffResponse.json();
-      const revisionsData = await revisionsResponse.json();
+      const spacesData = await spacesResponse.json();
       
       if (!diffResponse.ok) {
         setChangesDiff({ error: diffData.error || 'Failed to load changes' });
@@ -141,20 +141,20 @@ export default function ActivePage() {
         setChangesDiff(diffData);
       }
 
-      // Calculate next revision name
-      if (revisionsData.versions && revisionsData.versions.length > 0) {
-        const versions = revisionsData.versions
-          .map((v: string) => {
-            const match = v.match(/^v(\d+)$/);
+      // Calculate next space name
+      if (spacesData.spaces && spacesData.spaces.length > 0) {
+        const versions = spacesData.spaces
+          .map((s: SpaceInfo) => {
+            const match = s.name.match(/^v(\d+)$/);
             return match ? parseInt(match[1], 10) : 0;
           })
           .filter((v: number) => v > 0)
           .sort((a: number, b: number) => b - a);
         
         const nextVersionNumber = versions.length > 0 ? versions[0] + 1 : 2;
-        setNextRevisionName(`v${nextVersionNumber}`);
+        setNextSpaceName(`v${nextVersionNumber}`);
       } else {
-        setNextRevisionName('v2');
+        setNextSpaceName('v2');
       }
     } catch (error) {
       console.error('Error fetching changes:', error);
@@ -196,22 +196,50 @@ export default function ActivePage() {
     }
   };
 
+  const fetchNodesForSpace = async (spaceId: string) => {
+    try {
+      const response = await fetch(`/api/extensions?space=${encodeURIComponent(spaceId)}`);
+      const data = await response.json();
+      if (data.error) {
+        setError(data.message || 'Failed to fetch extensions');
+        setNodes([]);
+      } else {
+        setNodes(data.nodes || []);
+        setError(null);
+      }
+    } catch (err) {
+      console.error('Error fetching nodes:', err);
+      setError('Failed to fetch nodes');
+      setNodes([]);
+    }
+  };
+
   useEffect(() => {
     // Fetch the selected version and extensions
     Promise.all([
-      fetch('/api/revisions').then(res => res.json()),
+      fetch('/api/spaces').then(res => res.json()),
       fetch('/api/extensions').then(res => res.json()),
       fetch('/api/requirements').then(res => res.json()),
       fetch('/api/models').then(res => res.json())
     ])
-      .then(([revisionData, extensionsData, requirementsData, modelsData]) => {
-        setSelectedVersion(revisionData.selectedVersion);
-        setRevisions(revisionData.revisions || []);
-        if (extensionsData.error) {
-          setError(extensionsData.message || 'Failed to fetch extensions');
+      .then(async ([spaceData, extensionsData, requirementsData, modelsData]) => {
+        setSelectedVersion(spaceData.selectedVersion);
+        setSpaces(spaceData.spaces || []);
+        
+        // Fetch extensions for the selected space
+        const selectedSpaceId = spaceData.selectedVersion;
+        if (selectedSpaceId) {
+          await fetchNodesForSpace(selectedSpaceId);
         } else {
-          setNodes(extensionsData.nodes || []);
+          // Fallback to default extensions if no space selected
+          if (extensionsData.error) {
+            setError(extensionsData.message || 'Failed to fetch extensions');
+            setNodes([]);
+          } else {
+            setNodes(extensionsData.nodes || []);
+          }
         }
+        
         if (requirementsData.error) {
           console.error('Error fetching requirements:', requirementsData.error);
           setDependencies([]);
@@ -232,6 +260,13 @@ export default function ActivePage() {
         setLoading(false);
       });
   }, []);
+
+  // Refetch nodes when selected space changes
+  useEffect(() => {
+    if (selectedVersion) {
+      fetchNodesForSpace(selectedVersion);
+    }
+  }, [selectedVersion]);
 
   return (
     <>
@@ -259,7 +294,7 @@ export default function ActivePage() {
                 <RiHomeLine size={20} />
               </ActionIcon>
               <Text size="lg" fw={600} c="#ffffff">
-                {selectedVersion || 'No revision selected'}
+                {selectedVersion || 'No space selected'}
               </Text>
             </Group>
             <Group gap="sm" align="center">
@@ -277,6 +312,51 @@ export default function ActivePage() {
                 }}
               >
                 Launch ComfyUI
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={async () => {
+                  if (!selectedVersion) return;
+                  try {
+                    const response = await fetch(`/api/spaces/${encodeURIComponent(selectedVersion)}/export`);
+                    if (!response.ok) {
+                      const error = await response.json();
+                      alert(error.error || 'Failed to export space.json');
+                      return;
+                    }
+                    const blob = await response.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `space-${selectedVersion}.json`;
+                    document.body.appendChild(a);
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                    document.body.removeChild(a);
+                  } catch (error) {
+                    console.error('Error exporting space.json:', error);
+                    alert('Failed to export space.json');
+                  }
+                }}
+                disabled={!selectedVersion}
+                leftSection={<RiDownloadLine size={16} />}
+                styles={{
+                  root: {
+                    borderColor: selectedVersion ? '#373a40' : '#2c2e33',
+                    color: selectedVersion ? '#ffffff' : '#666666',
+                    '&:hover': {
+                      borderColor: selectedVersion ? '#555555' : '#2c2e33',
+                      backgroundColor: selectedVersion ? '#25262b' : 'transparent',
+                    },
+                    '&:disabled': {
+                      borderColor: '#2c2e33',
+                      color: '#666666',
+                    },
+                  },
+                }}
+              >
+                Export
               </Button>
               <ActionIcon
                 variant="subtle"
@@ -313,8 +393,8 @@ export default function ActivePage() {
               <Stack gap="md" mb="md">
                 <Group gap="sm" align="center">
                   {(() => {
-                    const selectedRevision = revisions.find(rev => rev.name === selectedVersion);
-                    return selectedRevision ? (
+                    const selectedSpace = spaces.find(s => s.name === selectedVersion);
+                    return selectedSpace ? (
                       <>
                         <Badge
                           size="sm"
@@ -325,7 +405,7 @@ export default function ActivePage() {
                             backgroundColor: 'transparent',
                           }}
                         >
-                          Python: {selectedRevision.pythonVersion}
+                          Python: {selectedSpace.pythonVersion}
                         </Badge>
                         <Badge
                           size="sm"
@@ -336,7 +416,7 @@ export default function ActivePage() {
                             backgroundColor: 'transparent',
                           }}
                         >
-                          ComfyUI: {selectedRevision.comfyUIVersion}
+                          ComfyUI: {selectedSpace.comfyUIVersion}
                         </Badge>
                       </>
                     ) : null;
@@ -637,7 +717,7 @@ export default function ActivePage() {
         onClose={() => {
           setChangesModalOpened(false);
           setChangesDiff(null);
-          setNextRevisionName('');
+          setNextSpaceName('');
         }}
         title="Requirements Changes"
         size="xl"
@@ -666,15 +746,15 @@ export default function ActivePage() {
                 </Text>
               </Group>
               <Button
-                onClick={handleCreateRevision}
-                loading={creatingRevision}
-                disabled={creatingRevision || !changesDiff.diff || changesDiff.diff.every((item: any) => item.type === 'unchanged')}
+                onClick={handleCreateSpace}
+                loading={creatingSpace}
+                disabled={creatingSpace || !changesDiff.diff || changesDiff.diff.every((item: any) => item.type === 'unchanged')}
                 style={{
-                  backgroundColor: creatingRevision || (!changesDiff.diff || changesDiff.diff.every((item: any) => item.type === 'unchanged')) ? undefined : '#0070f3',
-                  color: (creatingRevision || !changesDiff.diff || changesDiff.diff.every((item: any) => item.type === 'unchanged')) ? '#000000' : '#ffffff',
+                  backgroundColor: creatingSpace || (!changesDiff.diff || changesDiff.diff.every((item: any) => item.type === 'unchanged')) ? undefined : '#0070f3',
+                  color: (creatingSpace || !changesDiff.diff || changesDiff.diff.every((item: any) => item.type === 'unchanged')) ? '#000000' : '#ffffff',
                 }}
               >
-                Create New Revision{nextRevisionName ? ` (${nextRevisionName})` : ''}
+                Create New Space{nextSpaceName ? ` (${nextSpaceName})` : ''}
               </Button>
             </Group>
             

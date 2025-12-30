@@ -97,9 +97,9 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Get selected revision
-    const revisionsPath = join(process.cwd(), 'data', 'revisions');
-    const selectedVersionPath = join(revisionsPath, 'selected_version.txt');
+    // Get selected space
+    const spacesPath = join(process.cwd(), 'spaces');
+    const selectedVersionPath = join(spacesPath, 'selected_version.txt');
     let selectedVersion = 'v1';
     try {
       const selectedContent = await readFile(selectedVersionPath, 'utf-8');
@@ -108,21 +108,22 @@ export async function GET(request: NextRequest) {
       // Default to v1 if file doesn't exist
     }
 
-    const backupPath = join(revisionsPath, selectedVersion, 'requirements.bkp');
-    const requirementsPath = join(revisionsPath, selectedVersion, 'requirements.txt');
+    const spaceJsonPath = join(spacesPath, selectedVersion, 'space.json');
     const nodeRequirementsPath = join(process.cwd(), 'data', 'nodes', nodeName, 'requirements.txt');
 
-    // Use backup file as source if it exists, otherwise use requirements.txt
-    const sourcePath = existsSync(backupPath) ? backupPath : requirementsPath;
-    const sourceLabel = existsSync(backupPath) ? 'requirements.bkp' : 'requirements.txt';
-
-    // Check if source file exists
-    if (!existsSync(sourcePath)) {
+    // Check if space.json exists
+    if (!existsSync(spaceJsonPath)) {
       return NextResponse.json(
-        { error: `${sourceLabel} not found in ${selectedVersion}` },
+        { error: `space.json not found in ${selectedVersion}` },
         { status: 404 }
       );
     }
+
+    // Read space.json to get current dependencies
+    const spaceJsonContent = await readFile(spaceJsonPath, 'utf-8');
+    const spaceJson = JSON.parse(spaceJsonContent);
+    const currentDependencies = spaceJson.dependencies || [];
+    const sourceContent = currentDependencies.join('\n');
 
     if (!existsSync(nodeRequirementsPath)) {
       return NextResponse.json(
@@ -136,8 +137,7 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Read both files
-    const sourceContent = await readFile(sourcePath, 'utf-8');
+    // Read node requirements
     const nodeContent = await readFile(nodeRequirementsPath, 'utf-8');
 
     // Parse dependencies
@@ -275,7 +275,7 @@ export async function GET(request: NextRequest) {
     try {
       // Determine Python executable - use venv Python from v1 if available
       const isWindows = process.platform === 'win32';
-      const venvPath = join(process.cwd(), 'data', 'revisions', 'v1', 'venv');
+      const venvPath = join(process.cwd(), 'spaces', 'v1', 'venv');
       let pythonExec = 'python3';
       
       if (existsSync(venvPath)) {

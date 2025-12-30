@@ -49,7 +49,7 @@ export default function LogSidebar(props: LogSidebarProps = {}) {
 
   // Fetch selected version on mount
   useEffect(() => {
-    fetch('/api/revisions')
+    fetch('/api/spaces')
       .then(res => res.json())
       .then((data) => {
         setSelectedVersion(data.selectedVersion || '');

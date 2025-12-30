@@ -1,5 +1,5 @@
 # Virtual environments
-data/revisions/**/venv/
+spaces/**/venv/
 venv/
 **/venv/
 **/venv/**
@@ -7,10 +7,16 @@ venv/
 # Log files
 **/logs.txt
 logs.txt
+**/comfy-logs.txt
+comfy-logs.txt
 
 # Nodes directories inside data/nodes (all node repositories)
 data/nodes/*
 !data/nodes/.gitkeep
+
+# Spaces directories (ComfyUI and nodes are large)
+spaces/**/ComfyUI/
+spaces/**/nodes/
 
 .next/
 node_modules/
@@ -31,5 +37,4 @@ ehthumbs.db
 .directory
 
 # Other
-data/comfy-logs.txt
 data/temp/

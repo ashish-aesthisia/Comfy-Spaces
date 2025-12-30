@@ -4,17 +4,19 @@ import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { Container, Title, Text, Select, Button, Alert, Group, Stack, Paper, ScrollArea, Badge } from '@mantine/core';
 import { RiCheckLine, RiErrorWarningLine, RiRefreshLine, RiCheckboxCircleFill, RiCloseLine, RiAddLine, RiFileCodeLine, RiGitBranchLine, RiArrowRightLine } from 'react-icons/ri';
+import CreateSpaceModal from './components/CreateSpaceModal';
 
-interface RevisionInfo {
-  name: string;
+interface SpaceInfo {
+  name: string; // spaceId (directory name)
+  visibleName?: string; // visible name from space.json
   pythonVersion: string;
   lastUpdated: string;
   path: string;
   comfyUIVersion: string;
 }
 
-interface RevisionsData {
-  revisions: RevisionInfo[];
+interface SpacesData {
+  spaces: SpaceInfo[];
   selectedVersion: string;
 }
 
@@ -25,8 +27,8 @@ interface LogEntry {
 
 export default function Home() {
   const router = useRouter();
-  const [revisions, setRevisions] = useState<RevisionsData | null>(null);
-  const [selectedRevision, setSelectedRevision] = useState<string>('');
+  const [spaces, setSpaces] = useState<SpacesData | null>(null);
+  const [selectedSpace, setSelectedSpace] = useState<string>('');
   const [isActivating, setIsActivating] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
@@ -34,18 +36,19 @@ export default function Home() {
   const [isComfyUIReady, setIsComfyUIReady] = useState(false);
   const logsEndRef = useRef<HTMLDivElement>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
+  const [createSpaceModalOpened, setCreateSpaceModalOpened] = useState(false);
 
   useEffect(() => {
-    // Fetch revisions on component mount
-    fetch('/api/revisions')
+    // Fetch spaces on component mount
+    fetch('/api/spaces')
       .then(res => res.json())
-      .then((data: RevisionsData) => {
-        setRevisions(data);
-        setSelectedRevision(data.selectedVersion);
+      .then((data: SpacesData) => {
+        setSpaces(data);
+        setSelectedSpace(data.selectedVersion);
       })
       .catch(err => {
-        console.error('Error fetching revisions:', err);
-        setMessage({ type: 'error', text: 'Failed to load revisions' });
+        console.error('Error fetching spaces:', err);
+        setMessage({ type: 'error', text: 'Failed to load spaces' });
       });
   }, []);
 
@@ -88,7 +91,7 @@ export default function Home() {
   };
 
   const handleActivate = async () => {
-    if (!selectedRevision) return;
+    if (!selectedSpace) return;
 
     setIsActivating(true);
     setMessage(null);
@@ -109,27 +112,27 @@ export default function Home() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ version: selectedRevision }),
+        body: JSON.stringify({ version: selectedSpace }),
       });
 
       const data = await response.json();
 
       if (!response.ok) {
-        setMessage({ type: 'error', text: data.error || 'Failed to activate revision' });
+        setMessage({ type: 'error', text: data.error || 'Failed to activate space' });
         setIsActivating(false);
         return;
       }
 
-      // Update the selected version in revisions data
-      if (revisions) {
-        setRevisions({ ...revisions, selectedVersion: selectedRevision });
+      // Update the selected version in spaces data
+      if (spaces) {
+        setSpaces({ ...spaces, selectedVersion: selectedSpace });
       }
 
       // Create AbortController for cancellation
       const abortController = new AbortController();
       
       // Connect to log stream with abort signal
-      const eventSource = new EventSource(`/api/activate/stream?version=${encodeURIComponent(selectedRevision)}`);
+      const eventSource = new EventSource(`/api/activate/stream?version=${encodeURIComponent(selectedSpace)}`);
       eventSourceRef.current = eventSource;
 
       // Store abort controller for cancellation
@@ -180,8 +183,8 @@ export default function Home() {
       // Note: We don't automatically navigate away - let user see the logs
       // They can manually navigate when ready
     } catch (error) {
-      console.error('Error activating revision:', error);
-      setMessage({ type: 'error', text: 'Failed to activate revision' });
+      console.error('Error activating space:', error);
+      setMessage({ type: 'error', text: 'Failed to activate space' });
       setIsActivating(false);
     }
   };
@@ -218,7 +221,7 @@ export default function Home() {
     return <span>{message}</span>;
   };
 
-  const isActivateEnabled = !!selectedRevision;
+  const isActivateEnabled = !!selectedSpace;
 
   return (
     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', backgroundColor: '#000000', paddingTop: '2rem', paddingBottom: '2rem' }}>
@@ -236,6 +239,7 @@ export default function Home() {
                   flex: 1,
                   textAlign: 'center',
                 }}
+                onClick={() => setCreateSpaceModalOpened(true)}
                 onMouseEnter={(e) => {
                   e.currentTarget.style.borderColor = '#555555';
                   e.currentTarget.style.backgroundColor = '#1a1a1a';
@@ -299,36 +303,36 @@ export default function Home() {
             </Group>
           </div>
 
-          {revisions?.revisions && revisions.revisions.length > 0 && (
+          {spaces?.spaces && spaces.spaces.length > 0 ? (
             <Paper p="md" style={{ backgroundColor: '#111111', border: '1px solid #333333', width: '50%', margin: '0 auto' }}>
               <Stack gap="xs">
-                {[...revisions.revisions].sort((a, b) => {
+                {[...spaces.spaces].sort((a, b) => {
                   const dateA = a.lastUpdated === 'Unknown' ? 0 : new Date(a.lastUpdated).getTime();
                   const dateB = b.lastUpdated === 'Unknown' ? 0 : new Date(b.lastUpdated).getTime();
                   return dateB - dateA; // Sort descending (most recent first)
-                }).map((revision) => (
+                }).map((space) => (
                   <Paper
-                    key={revision.name}
+                    key={space.name}
                     p="sm"
                     style={{
-                      backgroundColor: selectedRevision === revision.name ? '#1a1a2e' : '#0a0a0a',
+                      backgroundColor: selectedSpace === space.name ? '#1a1a2e' : '#0a0a0a',
                       border: '1px solid #333333',
                       cursor: 'pointer',
                       transition: 'background-color 0.2s',
                     }}
                     onMouseEnter={(e) => {
-                      if (selectedRevision !== revision.name) {
+                      if (selectedSpace !== space.name) {
                         e.currentTarget.style.backgroundColor = '#1a1a1a';
                       }
                     }}
                     onMouseLeave={(e) => {
-                      if (selectedRevision !== revision.name) {
+                      if (selectedSpace !== space.name) {
                         e.currentTarget.style.backgroundColor = '#0a0a0a';
                       }
                     }}
                     onClick={() => {
                       if (!isActivating) {
-                        setSelectedRevision(revision.name);
+                        setSelectedSpace(space.name);
                         setShowLogs(false);
                         setLogs([]);
                         setIsComfyUIReady(false);
@@ -339,7 +343,7 @@ export default function Home() {
                       <Stack gap="xs" style={{ flex: 1, minWidth: 0 }}>
                         <Group gap="xs" wrap="nowrap">
                           <Text fw={500} c="#ffffff" size="sm">
-                            {revision.name}
+                            {space.visibleName || space.name}
                           </Text>
                           <Badge
                             size="sm"
@@ -350,22 +354,22 @@ export default function Home() {
                               backgroundColor: 'transparent',
                             }}
                           >
-                            ComfyUI {revision.comfyUIVersion}
+                            ComfyUI {space.comfyUIVersion}
                           </Badge>
                         </Group>
                         <Group gap="md" wrap="nowrap">
                           <Text size="xs" c="#888888">
-                            Python: {revision.pythonVersion}
+                            Python: {space.pythonVersion}
                           </Text>
                           <Text size="xs" c="#888888">
-                            Updated: {formatDate(revision.lastUpdated)}
+                            Updated: {formatDate(space.lastUpdated)}
                           </Text>
                           <Text size="xs" c="#888888" style={{ fontFamily: 'monospace' }} truncate>
-                            {revision.path}
+                            {space.path}
                           </Text>
                         </Group>
                       </Stack>
-                      {isActivating && selectedRevision === revision.name ? (
+                      {isActivating && selectedSpace === space.name ? (
                         <Button
                           onClick={(e) => {
                             e.stopPropagation();
@@ -387,10 +391,10 @@ export default function Home() {
                           color="#888888"
                           onClick={(e) => {
                             e.stopPropagation();
-                            if (selectedRevision === revision.name) {
+                            if (selectedSpace === space.name) {
                               handleActivate();
                             } else {
-                              setSelectedRevision(revision.name);
+                              setSelectedSpace(space.name);
                               setShowLogs(false);
                               setLogs([]);
                               setIsComfyUIReady(false);
@@ -404,7 +408,18 @@ export default function Home() {
                 ))}
               </Stack>
             </Paper>
-          )}
+          ) : spaces !== null ? (
+            <Paper p="xl" style={{ backgroundColor: '#111111', border: '1px solid #333333', width: '50%', margin: '0 auto', textAlign: 'center' }}>
+              <Stack gap="md" align="center">
+                <Text size="lg" c="#888888" fw={500}>
+                  No spaces found
+                </Text>
+                <Text size="sm" c="#666666">
+                  Create your first space to get started
+                </Text>
+              </Stack>
+            </Paper>
+          ) : null}
 
           {message && (
             <Alert
@@ -420,11 +435,11 @@ export default function Home() {
             </Alert>
           )}
 
-          {showLogs && selectedRevision && (
+          {showLogs && selectedSpace && (
             <Paper p="md" style={{ backgroundColor: '#111111', border: '1px solid #333333' }}>
               <Stack gap="sm">
                 <Group justify="space-between" align="center">
-                  <Text fw={600} size="lg" c="#ffffff">Activation Logs - {selectedRevision}</Text>
+                  <Text fw={600} size="lg" c="#ffffff">Activation Logs - {selectedSpace}</Text>
                   <Button
                     variant="subtle"
                     size="xs"
@@ -480,7 +495,7 @@ export default function Home() {
                       <Group gap="xs" align="center" style={{ marginLeft: '1rem' }}>
                         <RiCheckboxCircleFill size={16} color="#00d9ff" />
                         <Text size="sm" c="#00d9ff" fw={500}>
-                          VI is ready ({selectedRevision})
+                          VI is ready ({selectedSpace})
                         </Text>
                       </Group>
                     )}
@@ -503,6 +518,28 @@ export default function Home() {
           )}
         </Stack>
       </Container>
+
+      <CreateSpaceModal
+        opened={createSpaceModalOpened}
+        onClose={() => setCreateSpaceModalOpened(false)}
+        onSuccess={async () => {
+          // Refresh spaces list
+          try {
+            const res = await fetch('/api/spaces');
+            const data: SpacesData = await res.json();
+            setSpaces(data);
+            if (data.selectedVersion) {
+              setSelectedSpace(data.selectedVersion);
+              // Automatically activate the new space
+              setTimeout(() => {
+                handleActivate();
+              }, 500);
+            }
+          } catch (err) {
+            console.error('Error refreshing spaces:', err);
+          }
+        }}
+      />
     </div>
   );
 }

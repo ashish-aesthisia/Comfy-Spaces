@@ -23,9 +23,9 @@ export async function GET(request: NextRequest) {
 
       // If version is provided, read from the activation log file
       if (version) {
-        const revisionPath = join(process.cwd(), 'data', 'revisions', version);
-        const logFilePath = join(revisionPath, 'logs.txt');
-        const comfyLogFilePath = join(process.cwd(), 'data', 'comfy-logs.txt');
+        const spacePath = join(process.cwd(), 'spaces', version);
+        const logFilePath = join(spacePath, 'logs.txt');
+        const comfyLogFilePath = join(spacePath, 'comfy-logs.txt');
 
         try {
           // Helper function to watch a log file
@@ -185,7 +185,7 @@ export async function GET(request: NextRequest) {
         }
       } else {
         // No version provided, just send a message
-        sendLog('No revision version specified. Please provide version parameter.');
+        sendLog('No space version specified. Please provide version parameter.');
         controller.close();
       }
     },

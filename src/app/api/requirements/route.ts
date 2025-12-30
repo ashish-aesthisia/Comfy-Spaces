@@ -42,9 +42,9 @@ function parseRequirements(content: string): Dependency[] {
 
 export async function GET() {
   try {
-    // Get selected revision
-    const revisionsPath = join(process.cwd(), 'data', 'revisions');
-    const selectedVersionPath = join(revisionsPath, 'selected_version.txt');
+    // Get selected space
+    const spacesPath = join(process.cwd(), 'spaces');
+    const selectedVersionPath = join(spacesPath, 'selected_version.txt');
     let selectedVersion = 'v1';
     try {
       const selectedContent = await readFile(selectedVersionPath, 'utf-8');
@@ -53,19 +53,32 @@ export async function GET() {
       // Default to v1 if file doesn't exist
     }
 
-    const requirementsPath = join(revisionsPath, selectedVersion, 'requirements.txt');
+    const spaceJsonPath = join(spacesPath, selectedVersion, 'space.json');
 
-    // Check if file exists
-    if (!existsSync(requirementsPath)) {
+    // Check if space.json exists
+    if (!existsSync(spaceJsonPath)) {
       return NextResponse.json({
         dependencies: [],
         selectedVersion,
       });
     }
 
-    // Read and parse requirements
-    const content = await readFile(requirementsPath, 'utf-8');
-    const dependencies = parseRequirements(content);
+    // Read and parse dependencies from space.json
+    const spaceJsonContent = await readFile(spaceJsonPath, 'utf-8');
+    const spaceJson = JSON.parse(spaceJsonContent);
+    const dependenciesList = spaceJson.dependencies || [];
+    
+    // Convert to Dependency format
+    const dependencies: Dependency[] = dependenciesList.map((dep: string) => {
+      const match = dep.match(/^([a-zA-Z0-9_.-]+(?:\[[^\]]+\])?)(?:\s*([=<>!~]+)\s*(.+))?$/);
+      if (match) {
+        const fullName = match[1];
+        const name = fullName.split('[')[0];
+        const version = match[3] ? match[3].trim() : '*';
+        return { name, version, fullLine: dep };
+      }
+      return { name: dep, version: '*', fullLine: dep };
+    });
 
     return NextResponse.json({
       dependencies,

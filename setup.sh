@@ -1,22 +1,44 @@
 #!/bin/bash
 
-mkdir -p data/revisions
+mkdir -p spaces
 
 if [ ! -d data/nodes ]; then
   mkdir -p data/nodes
 fi
 
-if [ ! -d data/revisions/v1 ]; then
-  mkdir -p data/revisions/v1
+if [ ! -d spaces/v1 ]; then
+  mkdir -p spaces/v1
 fi
 
-if [ ! -d data/revisions/v1/venv ]; then
-    python3 -m venv data/revisions/v1/venv
+# Create ComfyUI directory in space
+if [ ! -d spaces/v1/ComfyUI ]; then
+  cp -r ComfyUI spaces/v1/ComfyUI
 fi
 
-cp ComfyUI/requirements.txt data/revisions/v1/requirements.txt
-touch data/revisions/v1/nodes_status.json
+# Create nodes directory in space
+if [ ! -d spaces/v1/nodes ]; then
+  mkdir -p spaces/v1/nodes
+fi
 
-if [ ! -f data/revisions/selected_version.txt ]; then
-  echo "v1" > data/revisions/selected_version.txt
+# Create venv in space
+if [ ! -d spaces/v1/venv ]; then
+    python3 -m venv spaces/v1/venv
+fi
+
+# Create space.json with initial structure
+if [ ! -f spaces/v1/space.json ]; then
+  cat > spaces/v1/space.json << EOF
+{
+  "nodes": [],
+  "dependencies": []
+}
+EOF
+fi
+
+# Create log files
+touch spaces/v1/logs.txt
+touch spaces/v1/comfy-logs.txt
+
+if [ ! -f spaces/selected_version.txt ]; then
+  echo "v1" > spaces/selected_version.txt
 fi

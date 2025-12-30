@@ -14,9 +14,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Get selected revision
-    const revisionsPath = join(process.cwd(), 'data', 'revisions');
-    const selectedVersionPath = join(revisionsPath, 'selected_version.txt');
+    // Get selected space
+    const spacesPath = join(process.cwd(), 'spaces');
+    const selectedVersionPath = join(spacesPath, 'selected_version.txt');
     let selectedVersion = 'v1';
     try {
       const selectedContent = await readFile(selectedVersionPath, 'utf-8');
@@ -25,31 +25,30 @@ export async function POST(request: NextRequest) {
       // Default to v1 if file doesn't exist
     }
 
-    const requirementsPath = join(revisionsPath, selectedVersion, 'requirements.txt');
-    const backupPath = join(revisionsPath, selectedVersion, 'requirements.bkp');
+    const spaceJsonPath = join(spacesPath, selectedVersion, 'space.json');
 
-    // Check if requirements.txt exists
-    if (!existsSync(requirementsPath)) {
+    // Check if space.json exists
+    if (!existsSync(spaceJsonPath)) {
       return NextResponse.json(
-        { error: `requirements.txt not found in ${selectedVersion}` },
+        { error: `space.json not found in ${selectedVersion}` },
         { status: 404 }
       );
     }
 
-    // Create backup only if it doesn't exist - never update/overwrite existing backup
-    if (!existsSync(backupPath)) {
-      await copyFile(requirementsPath, backupPath);
-    }
+    // Read current space.json
+    const spaceJsonContent = await readFile(spaceJsonPath, 'utf-8');
+    const spaceJson = JSON.parse(spaceJsonContent);
 
-    // Write merged dependencies to requirements.txt
-    const mergedContent = mergedDependencies.join('\n') + '\n';
-    await writeFile(requirementsPath, mergedContent, 'utf-8');
+    // Update dependencies in space.json
+    spaceJson.dependencies = mergedDependencies;
+
+    // Write updated space.json
+    await writeFile(spaceJsonPath, JSON.stringify(spaceJson, null, 2), 'utf-8');
 
     return NextResponse.json({ 
       success: true,
-      message: 'Requirements merged successfully',
-      backupPath: backupPath,
-      revision: selectedVersion,
+      message: 'Dependencies merged successfully',
+      space: selectedVersion,
     });
   } catch (error) {
     console.error('Error merging requirements:', error);

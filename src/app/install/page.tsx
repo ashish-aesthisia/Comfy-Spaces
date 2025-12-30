@@ -77,7 +77,7 @@ export default function InstallPage() {
     }
 
     // Fetch selected revision
-    fetch('/api/revisions')
+    fetch('/api/spaces')
       .then(res => res.json())
       .then((data) => {
         setSelectedRevision(data.selectedVersion || 'v1');

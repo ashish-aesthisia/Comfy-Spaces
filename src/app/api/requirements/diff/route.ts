@@ -5,9 +5,9 @@ import { existsSync } from 'fs';
 
 export async function GET() {
   try {
-    // Get selected revision
-    const revisionsPath = join(process.cwd(), 'data', 'revisions');
-    const selectedVersionPath = join(revisionsPath, 'selected_version.txt');
+    // Get selected space
+    const spacesPath = join(process.cwd(), 'spaces');
+    const selectedVersionPath = join(spacesPath, 'selected_version.txt');
     let selectedVersion = 'v1';
     try {
       const selectedContent = await readFile(selectedVersionPath, 'utf-8');
@@ -16,30 +16,25 @@ export async function GET() {
       // Default to v1 if file doesn't exist
     }
 
-    const requirementsPath = join(revisionsPath, selectedVersion, 'requirements.txt');
-    const backupPath = join(revisionsPath, selectedVersion, 'requirements.bkp');
+    const spaceJsonPath = join(spacesPath, selectedVersion, 'space.json');
 
-    // Check if files exist
-    if (!existsSync(requirementsPath)) {
+    // Check if space.json exists
+    if (!existsSync(spaceJsonPath)) {
       return NextResponse.json(
-        { error: `requirements.txt not found in ${selectedVersion}` },
+        { error: `space.json not found in ${selectedVersion}` },
         { status: 404 }
       );
     }
 
-    if (!existsSync(backupPath)) {
-      return NextResponse.json(
-        { 
-          error: 'requirements.bkp not found',
-          hasBackup: false,
-        },
-        { status: 200 }
-      );
-    }
-
-    // Read both files
-    const currentContent = await readFile(requirementsPath, 'utf-8');
-    const backupContent = await readFile(backupPath, 'utf-8');
+    // Read space.json
+    const spaceJsonContent = await readFile(spaceJsonPath, 'utf-8');
+    const spaceJson = JSON.parse(spaceJsonContent);
+    const currentDependencies = spaceJson.dependencies || [];
+    
+    // For now, return empty diff since we don't have a backup mechanism yet
+    // This can be enhanced later to compare with a previous version
+    const currentContent = currentDependencies.join('\n');
+    const backupContent = currentDependencies.join('\n'); // Same as current for now
 
     // Split into lines for comparison
     const currentLines = currentContent.split('\n');

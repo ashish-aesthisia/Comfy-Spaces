@@ -1,5 +1,5 @@
-import { NextResponse } from 'next/server';
-import { readdir } from 'fs/promises';
+import { NextRequest, NextResponse } from 'next/server';
+import { readdir, readFile } from 'fs/promises';
 import { join } from 'path';
 import { existsSync } from 'fs';
 import { execSync } from 'child_process';
@@ -46,19 +46,47 @@ async function getGitMetadata(nodePath: string): Promise<{ githubUrl?: string; b
   }
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    // Fetch extensions from ComfyUI endpoint
-    const comfyUrl = process.env.COMFYUI_URL || 'http://localhost:8188';
-    const extensionsResponse = await fetch(`${comfyUrl}/extensions`, {
-      cache: 'no-store',
-    });
-
-    if (!extensionsResponse.ok) {
-      throw new Error(`Failed to fetch extensions: ${extensionsResponse.statusText}`);
+    // Get selected space from query parameter or selected_version.txt
+    const searchParams = request.nextUrl.searchParams;
+    let spaceId = searchParams.get('space');
+    
+    if (!spaceId) {
+      // Get selected space from selected_version.txt
+      const spacesPath = join(process.cwd(), 'spaces');
+      const selectedVersionPath = join(spacesPath, 'selected_version.txt');
+      try {
+        const selectedContent = await readFile(selectedVersionPath, 'utf-8');
+        spaceId = selectedContent.trim();
+      } catch (error) {
+        // If no space is selected, return empty nodes
+        return NextResponse.json({
+          nodes: [],
+          total: 0,
+          active: 0,
+          failed: 0,
+        });
+      }
     }
 
-    const extensions: string[] = await extensionsResponse.json();
+    // Fetch extensions from ComfyUI endpoint
+    const comfyUrl = process.env.COMFYUI_URL || 'http://localhost:8188';
+    let extensions: string[] = [];
+    
+    try {
+      const extensionsResponse = await fetch(`${comfyUrl}/extensions`, {
+        cache: 'no-store',
+      });
+
+      if (extensionsResponse.ok) {
+        extensions = await extensionsResponse.json();
+      } else {
+        console.warn(`Failed to fetch extensions from ComfyUI: ${extensionsResponse.statusText}`);
+      }
+    } catch (error) {
+      console.warn('ComfyUI not available, will only show nodes from directory');
+    }
 
     // Group extensions by node name
     // Path format: /extensions/<node-name>/...
@@ -84,8 +112,9 @@ export async function GET() {
       }
     });
 
-    // Get nodes from /data/nodes directory
-    const nodesDataPath = join(process.cwd(), 'data', 'nodes');
+    // Get nodes from space's ComfyUI/custom_nodes directory
+    const spacesPath = join(process.cwd(), 'spaces');
+    const nodesDataPath = join(spacesPath, spaceId, 'ComfyUI', 'custom_nodes');
     let nodesInDataDir: string[] = [];
     try {
       const entries = await readdir(nodesDataPath, { withFileTypes: true });
@@ -98,7 +127,7 @@ export async function GET() {
         });
     } catch (error) {
       // Directory might not exist or be empty, that's okay
-      console.log('No nodes found in data/nodes directory');
+      console.log(`No nodes found in space ${spaceId}/ComfyUI/custom_nodes directory`);
     }
 
     // Create a set for quick lookup

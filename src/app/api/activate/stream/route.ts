@@ -270,16 +270,17 @@ export async function GET(request: NextRequest) {
 
   const stream = new ReadableStream({
     async start(controller) {
-      const revisionPath = join(process.cwd(), 'data', 'revisions', version);
-      const venvPath = join(revisionPath, 'venv');
-      const requirementsPath = join(revisionPath, 'requirements.txt');
-      const logFilePath = join(revisionPath, 'logs.txt');
-      const comfyUIPath = join(process.cwd(), 'ComfyUI');
+      const spacePath = join(process.cwd(), 'spaces', version);
+      const venvPath = join(spacePath, 'venv');
+      const spaceJsonPath = join(spacePath, 'space.json');
+      const logFilePath = join(spacePath, 'logs.txt');
+      const comfyLogFilePath = join(spacePath, 'comfy-logs.txt');
+      const comfyUIPath = join(spacePath, 'ComfyUI');
 
       // Ensure log directory exists
       try {
-        if (!existsSync(revisionPath)) {
-          mkdirSync(revisionPath, { recursive: true });
+        if (!existsSync(spacePath)) {
+          mkdirSync(spacePath, { recursive: true });
         }
         // Clear or create log file
         writeFileSync(logFilePath, `=== Activation Log for ${version} - ${new Date().toISOString()} ===\n\n`);
@@ -288,7 +289,6 @@ export async function GET(request: NextRequest) {
       }
 
       // Clear ComfyUI log file at the start of activation
-      const comfyLogFilePath = join(process.cwd(), 'data', 'comfy-logs.txt');
       try {
         const comfyLogDir = join(comfyLogFilePath, '..');
         if (!existsSync(comfyLogDir)) {
@@ -350,7 +350,7 @@ export async function GET(request: NextRequest) {
           
           // Create venv with process tracking
           const venvProcess = spawn('python3', ['-m', 'venv', venvPath], {
-            cwd: revisionPath,
+            cwd: spacePath,
             env: { ...process.env },
             shell: true,
           });
@@ -417,7 +417,7 @@ export async function GET(request: NextRequest) {
         // Display Python and pip versions
         sendLog(controller, encoder, `[APP] Python executable: ${pythonExec}`, logFilePath);
         try {
-          const pythonVersion = await getVersion(pythonExec, ['--version'], revisionPath, process.env);
+          const pythonVersion = await getVersion(pythonExec, ['--version'], spacePath, process.env);
           sendLog(controller, encoder, `[APP] Python version: ${pythonVersion}`, logFilePath);
         } catch (error: any) {
           sendLog(controller, encoder, `[WARN] Could not get Python version: ${error.message}`, logFilePath);
@@ -425,7 +425,7 @@ export async function GET(request: NextRequest) {
 
         sendLog(controller, encoder, `[APP] Pip executable: ${pipExec}`, logFilePath);
         try {
-          const pipVersion = await getVersion(pipExec, ['--version'], revisionPath, process.env);
+          const pipVersion = await getVersion(pipExec, ['--version'], spacePath, process.env);
           sendLog(controller, encoder, `[APP] Pip version: ${pipVersion}`, logFilePath);
         } catch (error: any) {
           sendLog(controller, encoder, `[WARN] Could not get pip version: ${error.message}`, logFilePath);
@@ -436,64 +436,93 @@ export async function GET(request: NextRequest) {
           return;
         }
 
-        // Step 2: Install requirements
-        if (existsSync(requirementsPath)) {
-          sendLog(controller, encoder, `[APP] Installing requirements from requirements.txt...`, logFilePath);
-          
-          // Install requirements with process tracking
-          const pipProcess = spawn(pipExec, ['install', '-r', requirementsPath], {
-            cwd: revisionPath,
-            env: { ...process.env },
-            shell: true,
-          });
+        // Step 2: Install dependencies from space.json
+        let requirementsPath: string | null = null;
+        if (existsSync(spaceJsonPath)) {
+          try {
+            const spaceJsonContent = readFileSync(spaceJsonPath, 'utf-8');
+            const spaceJson = JSON.parse(spaceJsonContent);
+            const dependencies = spaceJson.dependencies || [];
+            
+            if (dependencies.length > 0) {
+              // Create temporary requirements.txt from space.json dependencies
+              const tempRequirementsPath = join(spacePath, 'requirements_temp.txt');
+              const requirementsContent = dependencies.map((dep: string) => dep).join('\n');
+              writeFileSync(tempRequirementsPath, requirementsContent, 'utf-8');
+              requirementsPath = tempRequirementsPath;
+              
+              sendLog(controller, encoder, `[APP] Installing dependencies from space.json...`, logFilePath);
+              
+              // Install requirements with process tracking
+              const pipProcess = spawn(pipExec, ['install', '-r', requirementsPath], {
+                cwd: spacePath,
+                env: { ...process.env },
+                shell: true,
+              });
 
-          const pipProcessKill = () => {
-            if (!pipProcess.killed) {
-              pipProcess.kill('SIGTERM');
+              const pipProcessKill = () => {
+                if (!pipProcess.killed) {
+                  pipProcess.kill('SIGTERM');
+                }
+              };
+              runningProcesses.push({ process: pipProcess, kill: pipProcessKill });
+
+              pipProcess.stdout?.on('data', (data) => {
+                const output = data.toString();
+                sendLog(controller, encoder, output.trim(), logFilePath);
+              });
+
+              pipProcess.stderr?.on('data', (data) => {
+                const output = data.toString();
+                sendLog(controller, encoder, output.trim(), logFilePath);
+              });
+
+              const pipInstallCode = await new Promise<number>((resolve) => {
+                pipProcess.on('close', (code) => {
+                  const index = runningProcesses.findIndex(p => p.process === pipProcess);
+                  if (index !== -1) {
+                    runningProcesses.splice(index, 1);
+                  }
+                  resolve(code || 0);
+                });
+                pipProcess.on('error', () => {
+                  const index = runningProcesses.findIndex(p => p.process === pipProcess);
+                  if (index !== -1) {
+                    runningProcesses.splice(index, 1);
+                  }
+                  resolve(1);
+                });
+              });
+
+              if (isCancelled) {
+                controller.close();
+                return;
+              }
+
+              if (pipInstallCode !== 0) {
+                sendLog(controller, encoder, `[ERROR] Failed to install dependencies`, logFilePath);
+                controller.close();
+                return;
+              }
+              sendLog(controller, encoder, `[APP] Dependencies installed successfully`, logFilePath);
+              
+              // Clean up temporary requirements file
+              try {
+                if (existsSync(requirementsPath)) {
+                  const { unlinkSync } = require('fs');
+                  unlinkSync(requirementsPath);
+                }
+              } catch (error) {
+                // Ignore cleanup errors
+              }
+            } else {
+              sendLog(controller, encoder, `[INFO] No dependencies found in space.json`, logFilePath);
             }
-          };
-          runningProcesses.push({ process: pipProcess, kill: pipProcessKill });
-
-          pipProcess.stdout?.on('data', (data) => {
-            const output = data.toString();
-            sendLog(controller, encoder, output.trim(), logFilePath);
-          });
-
-          pipProcess.stderr?.on('data', (data) => {
-            const output = data.toString();
-            sendLog(controller, encoder, output.trim(), logFilePath);
-          });
-
-          const pipInstallCode = await new Promise<number>((resolve) => {
-            pipProcess.on('close', (code) => {
-              const index = runningProcesses.findIndex(p => p.process === pipProcess);
-              if (index !== -1) {
-                runningProcesses.splice(index, 1);
-              }
-              resolve(code || 0);
-            });
-            pipProcess.on('error', () => {
-              const index = runningProcesses.findIndex(p => p.process === pipProcess);
-              if (index !== -1) {
-                runningProcesses.splice(index, 1);
-              }
-              resolve(1);
-            });
-          });
-
-          if (isCancelled) {
-            controller.close();
-            return;
+          } catch (error: any) {
+            sendLog(controller, encoder, `[WARN] Error reading space.json: ${error.message}`, logFilePath);
           }
-
-          if (pipInstallCode !== 0) {
-            sendLog(controller, encoder, `[ERROR] Failed to install requirements`, logFilePath);
-            controller.close();
-            return;
-          }
-          sendLog(controller, encoder, `[APP] Requirements installed successfully`, logFilePath);
         } else {
-          sendLog(controller, encoder, `[WARN] requirements.txt not found, skipping installation`, logFilePath);
+          sendLog(controller, encoder, `[WARN] space.json not found, skipping dependency installation`, logFilePath);
         }
 
         if (isCancelled) {
@@ -552,7 +581,7 @@ export async function GET(request: NextRequest) {
         
         // Default log file if not specified
         if (!comfyLogFile) {
-          comfyLogFile = join(process.cwd(), 'data', 'comfy-logs.txt');
+          comfyLogFile = comfyLogFilePath;
         } else {
           // Resolve relative paths (handle ./ and ../)
           if (!comfyLogFile.startsWith('/')) {
@@ -560,6 +589,11 @@ export async function GET(request: NextRequest) {
             const cleanPath = comfyLogFile.startsWith('./') ? comfyLogFile.substring(2) : comfyLogFile;
             comfyLogFile = join(process.cwd(), cleanPath);
           }
+        }
+        
+        // Ensure comfyLogFile is within the space directory
+        if (!comfyLogFile || comfyLogFile === comfyLogFilePath) {
+          comfyLogFile = comfyLogFilePath;
         }
         
         // Ensure log file directory exists
