@@ -1,9 +1,9 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Container, Title, Text, Stack, Button, Grid, Card, Group, Menu, ActionIcon, Modal, ScrollArea, Paper } from '@mantine/core';
+import { Container, Title, Text, Stack, Button, Grid, Card, Group, Menu, ActionIcon, Modal, ScrollArea, Paper, Badge } from '@mantine/core';
 import { useRouter } from 'next/navigation';
-import { RiHomeLine, RiCheckboxCircleFill, RiCloseCircleFill, RiDownloadLine, RiPencilLine, RiMoreFill, RiDeleteBinLine, RiStopCircleLine, RiHistoryLine } from 'react-icons/ri';
+import { RiHomeLine, RiCheckboxCircleFill, RiCloseCircleFill, RiDownloadLine, RiPencilLine, RiMoreFill, RiDeleteBinLine, RiStopCircleLine, RiHistoryLine, RiFileListLine, RiAddLine, RiArrowDownSLine, RiArrowUpSLine, RiExternalLinkLine } from 'react-icons/ri';
 import LogSidebar from './components/LogSidebar';
 import NodeTreeModal from './components/NodeTreeModal';
 
@@ -19,9 +19,36 @@ interface Node {
   disabled?: boolean;
 }
 
+interface RevisionInfo {
+  name: string;
+  pythonVersion: string;
+  lastUpdated: string;
+  path: string;
+  comfyUIVersion: string;
+}
+
+interface Dependency {
+  name: string;
+  version: string;
+  fullLine: string;
+}
+
+interface Model {
+  name: string;
+  type: string;
+  size: number;
+  path: string;
+  formattedSize?: string;
+}
+
 export default function ActivePage() {
   const [selectedVersion, setSelectedVersion] = useState<string>('');
+  const [revisions, setRevisions] = useState<RevisionInfo[]>([]);
   const [nodes, setNodes] = useState<Node[]>([]);
+  const [dependencies, setDependencies] = useState<Dependency[]>([]);
+  const [dependenciesExpanded, setDependenciesExpanded] = useState(false);
+  const [models, setModels] = useState<Model[]>([]);
+  const [modelsExpanded, setModelsExpanded] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
@@ -31,6 +58,7 @@ export default function ActivePage() {
   const [loadingChanges, setLoadingChanges] = useState(false);
   const [creatingRevision, setCreatingRevision] = useState(false);
   const [nextRevisionName, setNextRevisionName] = useState<string>('');
+  const [logsSidebarOpen, setLogsSidebarOpen] = useState(false);
   const router = useRouter();
 
   const handleUpdate = (node: Node) => {
@@ -172,14 +200,29 @@ export default function ActivePage() {
     // Fetch the selected version and extensions
     Promise.all([
       fetch('/api/revisions').then(res => res.json()),
-      fetch('/api/extensions').then(res => res.json())
+      fetch('/api/extensions').then(res => res.json()),
+      fetch('/api/requirements').then(res => res.json()),
+      fetch('/api/models').then(res => res.json())
     ])
-      .then(([revisionData, extensionsData]) => {
+      .then(([revisionData, extensionsData, requirementsData, modelsData]) => {
         setSelectedVersion(revisionData.selectedVersion);
+        setRevisions(revisionData.revisions || []);
         if (extensionsData.error) {
           setError(extensionsData.message || 'Failed to fetch extensions');
         } else {
           setNodes(extensionsData.nodes || []);
+        }
+        if (requirementsData.error) {
+          console.error('Error fetching requirements:', requirementsData.error);
+          setDependencies([]);
+        } else {
+          setDependencies(requirementsData.dependencies || []);
+        }
+        if (modelsData.error) {
+          console.error('Error fetching models:', modelsData.error);
+          setModels([]);
+        } else {
+          setModels(modelsData.models || []);
         }
         setLoading(false);
       })
@@ -192,81 +235,137 @@ export default function ActivePage() {
 
   return (
     <>
+      {/* Top Bar */}
+      <Paper
+        style={{
+          position: 'sticky',
+          top: 0,
+          zIndex: 100,
+          backgroundColor: '#1a1b1e',
+          borderBottom: '1px solid #373a40',
+          borderRadius: 0,
+        }}
+      >
+        <Container size="xl" py="md" style={{ width: '100%' }}>
+          <Group justify="space-between" align="center">
+            <Group gap="sm" align="center">
+              <ActionIcon
+                variant="subtle"
+                size="lg"
+                onClick={() => router.push('/')}
+                style={{ color: '#ffffff' }}
+                title="Home"
+              >
+                <RiHomeLine size={20} />
+              </ActionIcon>
+              <Text size="lg" fw={600} c="#ffffff">
+                {selectedVersion || 'No revision selected'}
+              </Text>
+            </Group>
+            <Group gap="sm" align="center">
+              <Button
+                component="a"
+                href="http://localhost:8188"
+                target="_blank"
+                rel="noopener noreferrer"
+                variant="subtle"
+                size="sm"
+                leftSection={<RiExternalLinkLine size={16} />}
+                style={{
+                  color: '#0070f3',
+                  fontWeight: 'bold',
+                }}
+              >
+                Launch ComfyUI
+              </Button>
+              <ActionIcon
+                variant="subtle"
+                size="lg"
+                onClick={handleShowChanges}
+                style={{
+                  color: '#51cf66',
+                }}
+                title="History"
+              >
+                <RiHistoryLine size={20} />
+              </ActionIcon>
+              <ActionIcon
+                variant={logsSidebarOpen ? 'filled' : 'subtle'}
+                size="lg"
+                onClick={() => setLogsSidebarOpen(!logsSidebarOpen)}
+                style={{
+                  color: logsSidebarOpen ? '#ffffff' : '#888888',
+                  backgroundColor: logsSidebarOpen ? '#0070f3' : 'transparent',
+                }}
+                title="Toggle Logs"
+              >
+                <RiFileListLine size={20} />
+              </ActionIcon>
+            </Group>
+          </Group>
+        </Container>
+      </Paper>
+
       <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', backgroundColor: '#1a1b1e', paddingTop: '2rem', paddingBottom: '2rem' }}>
         <Container size="xl" py="xl" style={{ width: '100%' }}>
           <Stack gap="md">
-            <Group justify="space-between" align="center">
-              <Group gap="xs">
-                <Button
-                  variant="subtle"
-                  leftSection={<RiHomeLine size={16} />}
-                  onClick={() => router.push('/')}
-                  size="sm"
-                  style={{ color: '#ffffff' }}
-                >
-                  Home
-                </Button>
-                <Button
-                  variant="outline"
-                  leftSection={<RiDownloadLine size={16} />}
-                  onClick={() => router.push('/install')}
-                  size="sm"
-                  style={{
-                    borderColor: '#0070f3',
-                    color: '#0070f3',
-                  }}
-                >
-                  Install new Custom Node
-                </Button>
-              </Group>
-
-              <Group gap="sm" align="center">
-                <Card
-                  padding="sm"
-                  radius="md"
-                  style={{
-                    backgroundColor: '#25262b',
-                    border: '1px solid #373a40',
-                    width: 'fit-content',
-                  }}
-                >
-                  {loading ? (
-                    <Text size="sm" c="dimmed">Loading...</Text>
-                  ) : (
-                    <Group gap="xs" align="center">
-                      <Text size="xs" c="#888888" fw={500}>
-                        REVISION
-                      </Text>
-                      <Text size="sm" fw={600} c="gray.0">
-                        {selectedVersion || 'No revision selected'}
-                      </Text>
-                    </Group>
-                  )}
-                </Card>
-                <Button
-                  variant="outline"
-                  leftSection={<RiHistoryLine size={16} />}
-                  onClick={handleShowChanges}
-                  size="sm"
-                  style={{
-                    borderColor: '#51cf66',
-                    color: '#51cf66',
-                  }}
-                >
-                  History
-                </Button>
-              </Group>
-            </Group>
-
             <div>
-              <Group justify="space-between" align="center" mb="md">
-                <Title order={2}>Nodes</Title>
-                {nodes.length > 0 && (
-                  <Text size="sm" c="dimmed">
-                    {nodes.filter(n => n.status === 'active').length} active, {nodes.filter(n => n.status === 'failed').length} failed
-                  </Text>
-                )}
-              </Group>
+              <Stack gap="md" mb="md">
+                <Group gap="sm" align="center">
+                  {(() => {
+                    const selectedRevision = revisions.find(rev => rev.name === selectedVersion);
+                    return selectedRevision ? (
+                      <>
+                        <Badge
+                          size="sm"
+                          variant="outline"
+                          style={{
+                            borderColor: '#a78bfa',
+                            color: '#a78bfa',
+                            backgroundColor: 'transparent',
+                          }}
+                        >
+                          Python: {selectedRevision.pythonVersion}
+                        </Badge>
+                        <Badge
+                          size="sm"
+                          variant="outline"
+                          style={{
+                            borderColor: '#a78bfa',
+                            color: '#a78bfa',
+                            backgroundColor: 'transparent',
+                          }}
+                        >
+                          ComfyUI: {selectedRevision.comfyUIVersion}
+                        </Badge>
+                      </>
+                    ) : null;
+                  })()}
+                </Group>
+                <Group justify="space-between" align="center">
+                  <Group gap="sm" align="center">
+                    <Title order={2}>Nodes</Title>
+                    <ActionIcon
+                      variant="outline"
+                      size="sm"
+                      onClick={() => router.push('/install')}
+                      style={{
+                        borderColor: '#0070f3',
+                        color: '#0070f3',
+                        borderRadius: '50%',
+                      }}
+                      title="Install new Custom Node"
+                    >
+                      <RiAddLine size={16} />
+                    </ActionIcon>
+                  </Group>
+                  {nodes.length > 0 && (
+                    <Text size="sm" c="dimmed">
+                      {nodes.filter(n => n.status === 'active').length} active, {nodes.filter(n => n.status === 'failed').length} failed
+                    </Text>
+                  )}
+                </Group>
+              </Stack>
               {error ? (
                 <Card padding="md" radius="md" style={{ backgroundColor: '#25262b', border: '1px solid #ff6b6b' }}>
                   <Text c="red" size="sm">Error: {error}</Text>
@@ -370,10 +469,157 @@ export default function ActivePage() {
                 </Grid>
               )}
             </div>
+
+            <div style={{ marginTop: '2rem' }}>
+              <Stack gap="md" mb="md">
+                <Group justify="space-between" align="center">
+                  <Group gap="sm" align="center">
+                    <Title order={2}>Dependencies</Title>
+                    <ActionIcon
+                      variant="subtle"
+                      size="sm"
+                      onClick={() => setDependenciesExpanded(!dependenciesExpanded)}
+                      style={{ color: '#ffffff' }}
+                      title={dependenciesExpanded ? 'Collapse' : 'Expand'}
+                    >
+                      {dependenciesExpanded ? <RiArrowUpSLine size={16} /> : <RiArrowDownSLine size={16} />}
+                    </ActionIcon>
+                  </Group>
+                  {dependencies.length > 0 && (
+                    <Text size="sm" c="dimmed">
+                      {dependencies.length} dependencies
+                    </Text>
+                  )}
+                </Group>
+              </Stack>
+              {dependenciesExpanded && (
+                <>
+                  {loading ? (
+                    <Text c="dimmed">Loading dependencies...</Text>
+                  ) : dependencies.length === 0 ? (
+                    <Text c="dimmed">No dependencies found</Text>
+                  ) : (
+                    <Grid gutter="sm">
+                      {dependencies.map((dep, index) => (
+                        <Grid.Col key={index} span={{ base: 12, sm: 6, md: 4, lg: 2 }}>
+                          <Card
+                            padding="sm"
+                            radius="md"
+                            style={{
+                              backgroundColor: '#25262b',
+                              border: '1px solid #373a40',
+                              height: '100%',
+                              transition: 'transform 0.2s, box-shadow 0.2s',
+                            }}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.transform = 'translateY(-2px)';
+                              e.currentTarget.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.3)';
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.transform = 'translateY(0)';
+                              e.currentTarget.style.boxShadow = 'none';
+                            }}
+                          >
+                            <Stack gap="xs">
+                              <Text size="xs" fw={500} c="gray.0" style={{ flex: 1 }}>
+                                {dep.name}
+                              </Text>
+                              <Text size="xs" c="#888888" style={{ fontFamily: 'monospace', fontSize: '10px' }}>
+                                {dep.version === '*' ? 'any version' : dep.version}
+                              </Text>
+                            </Stack>
+                          </Card>
+                        </Grid.Col>
+                      ))}
+                    </Grid>
+                  )}
+                </>
+              )}
+            </div>
+
+            <div style={{ marginTop: '2rem' }}>
+              <Stack gap="md" mb="md">
+                <Group justify="space-between" align="center">
+                  <Group gap="sm" align="center">
+                    <Title order={2}>Models</Title>
+                    <ActionIcon
+                      variant="subtle"
+                      size="sm"
+                      onClick={() => setModelsExpanded(!modelsExpanded)}
+                      style={{ color: '#ffffff' }}
+                      title={modelsExpanded ? 'Collapse' : 'Expand'}
+                    >
+                      {modelsExpanded ? <RiArrowUpSLine size={16} /> : <RiArrowDownSLine size={16} />}
+                    </ActionIcon>
+                  </Group>
+                  {models.length > 0 && (
+                    <Text size="sm" c="dimmed">
+                      {models.length} models
+                    </Text>
+                  )}
+                </Group>
+              </Stack>
+              {modelsExpanded && (
+                <>
+                  {loading ? (
+                    <Text c="dimmed">Loading models...</Text>
+                  ) : models.length === 0 ? (
+                    <Text c="dimmed">No models found</Text>
+                  ) : (
+                    <Grid gutter="sm">
+                      {models.map((model, index) => (
+                        <Grid.Col key={index} span={{ base: 12, sm: 6, md: 4, lg: 2 }}>
+                          <Card
+                            padding="sm"
+                            radius="md"
+                            style={{
+                              backgroundColor: '#25262b',
+                              border: '1px solid #373a40',
+                              height: '100%',
+                              transition: 'transform 0.2s, box-shadow 0.2s',
+                            }}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.transform = 'translateY(-2px)';
+                              e.currentTarget.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.3)';
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.transform = 'translateY(0)';
+                              e.currentTarget.style.boxShadow = 'none';
+                            }}
+                          >
+                            <Stack gap="xs">
+                              <Text size="xs" fw={500} c="gray.0" style={{ flex: 1 }} truncate>
+                                {model.name}
+                              </Text>
+                              <Group gap="xs" justify="space-between">
+                                <Badge
+                                  size="xs"
+                                  variant="outline"
+                                  style={{
+                                    borderColor: '#a78bfa',
+                                    color: '#a78bfa',
+                                    backgroundColor: 'transparent',
+                                  }}
+                                >
+                                  {model.type}
+                                </Badge>
+                                <Text size="xs" c="#888888" style={{ fontFamily: 'monospace', fontSize: '10px' }}>
+                                  {model.formattedSize || 'N/A'}
+                                </Text>
+                              </Group>
+                            </Stack>
+                          </Card>
+                        </Grid.Col>
+                      ))}
+                    </Grid>
+                  )}
+                </>
+              )}
+            </div>
           </Stack>
         </Container>
       </div>
-      <LogSidebar />
+      <LogSidebar isOpen={logsSidebarOpen} onToggle={setLogsSidebarOpen} />
       {selectedNode && (
         <NodeTreeModal
           opened={modalOpened}

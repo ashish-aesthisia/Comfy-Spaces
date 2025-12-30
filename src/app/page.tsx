@@ -2,11 +2,19 @@
 
 import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { Container, Title, Text, Select, Button, Alert, Group, Stack, Paper, ScrollArea } from '@mantine/core';
-import { RiCheckLine, RiErrorWarningLine, RiRefreshLine, RiCheckboxCircleFill, RiCloseLine } from 'react-icons/ri';
+import { Container, Title, Text, Select, Button, Alert, Group, Stack, Paper, ScrollArea, Badge } from '@mantine/core';
+import { RiCheckLine, RiErrorWarningLine, RiRefreshLine, RiCheckboxCircleFill, RiCloseLine, RiAddLine, RiFileCodeLine, RiGitBranchLine, RiArrowRightLine } from 'react-icons/ri';
+
+interface RevisionInfo {
+  name: string;
+  pythonVersion: string;
+  lastUpdated: string;
+  path: string;
+  comfyUIVersion: string;
+}
 
 interface RevisionsData {
-  versions: string[];
+  revisions: RevisionInfo[];
   selectedVersion: string;
 }
 
@@ -40,6 +48,16 @@ export default function Home() {
         setMessage({ type: 'error', text: 'Failed to load revisions' });
       });
   }, []);
+
+  const formatDate = (dateString: string) => {
+    if (dateString === 'Unknown') return dateString;
+    try {
+      const date = new Date(dateString);
+      return date.toLocaleString();
+    } catch {
+      return dateString;
+    }
+  };
 
   // Auto-scroll to bottom when new logs arrive
   useEffect(() => {
@@ -206,81 +224,187 @@ export default function Home() {
     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', backgroundColor: '#000000', paddingTop: '2rem', paddingBottom: '2rem' }}>
       <Container size="xl" py="xl" style={{ width: '100%' }}>
         <Stack gap="md">
-          <div style={{ textAlign: 'center' }}>
-            <Title order={2} mb="xs" c="#ffffff">Custom Nodes Manager</Title>
-            {revisions?.selectedVersion && (
-              <Text size="xs" c="#888888">
-                Active: <Text span c="#ffffff" fw={500}>{revisions.selectedVersion}</Text>
-              </Text>
-            )}
-          </div>
-
-          <Group gap="xs" align="flex-end" justify="center">
-            <Select
-              label="Revision"
-              placeholder="Select revision"
-              value={selectedRevision}
-              onChange={(value) => {
-                setSelectedRevision(value || '');
-                setShowLogs(false);
-                setLogs([]);
-                setIsComfyUIReady(false);
-              }}
-              data={revisions?.versions || []}
-              style={{ width: '200px' }}
-              size="sm"
-              styles={{
-                label: { color: '#ffffff' },
-                input: { 
-                  backgroundColor: '#1a1b1e', 
-                  color: '#ffffff', 
-                  borderColor: '#373a40' 
-                },
-                dropdown: {
-                  backgroundColor: '#25262b',
-                  border: '1px solid #373a40',
-                },
-                option: {
-                  color: '#ffffff',
-                  '&[data-selected]': {
-                    backgroundColor: '#0070f3',
-                  },
-                  '&:hover': {
-                    backgroundColor: '#373a40',
-                  },
-                },
-              }}
-            />
-            <Group gap="xs">
-              {isActivating && (
-                <Button
-                  onClick={handleCancel}
-                  variant="outline"
-                  style={{
-                    borderColor: '#ff4444',
-                    color: '#ff4444',
-                  }}
-                  leftSection={<RiCloseLine size={16} />}
-                  size="sm"
-                >
-                  Cancel
-                </Button>
-              )}
-              <Button
-                onClick={handleActivate}
-                disabled={!isActivateEnabled || isActivating}
-                loading={isActivating}
-                leftSection={!isActivating && <RiRefreshLine size={16} />}
-                size="sm"
+          <div style={{ textAlign: 'left', width: '50%', margin: '0 auto' }}>
+            <Title order={2} mb="xs" c="#ffffff">Comfy Spaces</Title>
+            <Group gap="xs" mt="md">
+              <Paper
+                p="sm"
                 style={{
-                  backgroundColor: isActivateEnabled && !isActivating ? '#0070f3' : undefined,
-                  color: (!isActivateEnabled || isActivating) ? '#000000' : '#ffffff',
+                  border: '1px solid #333333',
+                  backgroundColor: 'transparent',
+                  cursor: 'pointer',
+                  flex: 1,
+                  textAlign: 'center',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.borderColor = '#555555';
+                  e.currentTarget.style.backgroundColor = '#1a1a1a';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.borderColor = '#333333';
+                  e.currentTarget.style.backgroundColor = 'transparent';
                 }}
               >
-                Activate
-              </Button>
+                <Group gap="xs" justify="center" align="center">
+                  <RiAddLine size={16} color="#888888" />
+                  <Text size="sm" c="#888888">Create new Space</Text>
+                </Group>
+              </Paper>
+              <Paper
+                p="sm"
+                style={{
+                  border: '1px solid #333333',
+                  backgroundColor: 'transparent',
+                  cursor: 'pointer',
+                  flex: 1,
+                  textAlign: 'center',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.borderColor = '#555555';
+                  e.currentTarget.style.backgroundColor = '#1a1a1a';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.borderColor = '#333333';
+                  e.currentTarget.style.backgroundColor = 'transparent';
+                }}
+              >
+                <Group gap="xs" justify="center" align="center">
+                  <RiFileCodeLine size={16} color="#888888" />
+                  <Text size="sm" c="#888888">Import Json</Text>
+                </Group>
+              </Paper>
+              <Paper
+                p="sm"
+                style={{
+                  border: '1px solid #333333',
+                  backgroundColor: 'transparent',
+                  cursor: 'pointer',
+                  flex: 1,
+                  textAlign: 'center',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.borderColor = '#555555';
+                  e.currentTarget.style.backgroundColor = '#1a1a1a';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.borderColor = '#333333';
+                  e.currentTarget.style.backgroundColor = 'transparent';
+                }}
+              >
+                <Group gap="xs" justify="center" align="center">
+                  <RiGitBranchLine size={16} color="#888888" />
+                  <Text size="sm" c="#888888">Import from Git</Text>
+                </Group>
+              </Paper>
             </Group>
-          </Group>
+          </div>
+
+          {revisions?.revisions && revisions.revisions.length > 0 && (
+            <Paper p="md" style={{ backgroundColor: '#111111', border: '1px solid #333333', width: '50%', margin: '0 auto' }}>
+              <Stack gap="xs">
+                {[...revisions.revisions].sort((a, b) => {
+                  const dateA = a.lastUpdated === 'Unknown' ? 0 : new Date(a.lastUpdated).getTime();
+                  const dateB = b.lastUpdated === 'Unknown' ? 0 : new Date(b.lastUpdated).getTime();
+                  return dateB - dateA; // Sort descending (most recent first)
+                }).map((revision) => (
+                  <Paper
+                    key={revision.name}
+                    p="sm"
+                    style={{
+                      backgroundColor: selectedRevision === revision.name ? '#1a1a2e' : '#0a0a0a',
+                      border: '1px solid #333333',
+                      cursor: 'pointer',
+                      transition: 'background-color 0.2s',
+                    }}
+                    onMouseEnter={(e) => {
+                      if (selectedRevision !== revision.name) {
+                        e.currentTarget.style.backgroundColor = '#1a1a1a';
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      if (selectedRevision !== revision.name) {
+                        e.currentTarget.style.backgroundColor = '#0a0a0a';
+                      }
+                    }}
+                    onClick={() => {
+                      if (!isActivating) {
+                        setSelectedRevision(revision.name);
+                        setShowLogs(false);
+                        setLogs([]);
+                        setIsComfyUIReady(false);
+                      }
+                    }}
+                  >
+                    <Group justify="space-between" align="center" wrap="nowrap">
+                      <Stack gap="xs" style={{ flex: 1, minWidth: 0 }}>
+                        <Group gap="xs" wrap="nowrap">
+                          <Text fw={500} c="#ffffff" size="sm">
+                            {revision.name}
+                          </Text>
+                          <Badge
+                            size="sm"
+                            variant="outline"
+                            style={{
+                              borderColor: '#555555',
+                              color: '#888888',
+                              backgroundColor: 'transparent',
+                            }}
+                          >
+                            ComfyUI {revision.comfyUIVersion}
+                          </Badge>
+                        </Group>
+                        <Group gap="md" wrap="nowrap">
+                          <Text size="xs" c="#888888">
+                            Python: {revision.pythonVersion}
+                          </Text>
+                          <Text size="xs" c="#888888">
+                            Updated: {formatDate(revision.lastUpdated)}
+                          </Text>
+                          <Text size="xs" c="#888888" style={{ fontFamily: 'monospace' }} truncate>
+                            {revision.path}
+                          </Text>
+                        </Group>
+                      </Stack>
+                      {isActivating && selectedRevision === revision.name ? (
+                        <Button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleCancel();
+                          }}
+                          variant="outline"
+                          size="xs"
+                          style={{
+                            borderColor: '#ff4444',
+                            color: '#ff4444',
+                          }}
+                          leftSection={<RiCloseLine size={14} />}
+                        >
+                          Cancel
+                        </Button>
+                      ) : (
+                        <RiArrowRightLine 
+                          size={20} 
+                          color="#888888"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (selectedRevision === revision.name) {
+                              handleActivate();
+                            } else {
+                              setSelectedRevision(revision.name);
+                              setShowLogs(false);
+                              setLogs([]);
+                              setIsComfyUIReady(false);
+                            }
+                          }}
+                          style={{ cursor: 'pointer' }}
+                        />
+                      )}
+                    </Group>
+                  </Paper>
+                ))}
+              </Stack>
+            </Paper>
+          )}
 
           {message && (
             <Alert

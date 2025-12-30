@@ -11,7 +11,7 @@ import {
   Stack,
   ActionIcon
 } from '@mantine/core';
-import { RiSearchLine, RiCloseLine, RiArrowLeftLine, RiArrowRightLine } from 'react-icons/ri';
+import { RiSearchLine, RiCloseLine } from 'react-icons/ri';
 
 interface LogEntry {
   message: string;
@@ -20,8 +20,23 @@ interface LogEntry {
 
 type LogFilter = 'all' | 'app' | 'comfy';
 
-export default function LogSidebar() {
-  const [isOpen, setIsOpen] = useState(false);
+interface LogSidebarProps {
+  isOpen?: boolean;
+  onToggle?: (isOpen: boolean) => void;
+}
+
+export default function LogSidebar(props: LogSidebarProps = {}) {
+  const { isOpen: externalIsOpen, onToggle } = props;
+  const [internalIsOpen, setInternalIsOpen] = useState(false);
+  const isOpen = externalIsOpen !== undefined ? externalIsOpen : internalIsOpen;
+  
+  const setIsOpen = (value: boolean) => {
+    if (externalIsOpen !== undefined && onToggle) {
+      onToggle(value);
+    } else {
+      setInternalIsOpen(value);
+    }
+  };
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [logFilter, setLogFilter] = useState<LogFilter>('all');
@@ -168,22 +183,6 @@ export default function LogSidebar() {
 
   return (
     <>
-      {/* Toggle Button */}
-      <ActionIcon
-        variant="filled"
-        size="lg"
-        onClick={() => setIsOpen(!isOpen)}
-        style={{
-          position: 'fixed',
-          right: isOpen ? `${sidebarWidth}px` : '20px',
-          top: '20px',
-          zIndex: 1000,
-          transition: isResizing ? 'none' : 'right 0.3s ease',
-        }}
-      >
-        {isOpen ? <RiArrowRightLine size={20} /> : <RiArrowLeftLine size={20} />}
-      </ActionIcon>
-
       {/* Sidebar */}
       <Paper
         shadow="xl"

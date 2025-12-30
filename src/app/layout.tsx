@@ -39,7 +39,7 @@ const theme = createTheme({
 });
 
 export const metadata: Metadata = {
-  title: "Custom Nodes Manager",
+  title: "Comfy Spaces",
   description: "Manage and activate custom node revisions",
 };
 
