@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { join } from 'path';
 import { existsSync, writeFileSync, unlinkSync } from 'fs';
+import { readFile } from 'fs/promises';
 
 export async function POST(
   request: Request,
@@ -8,7 +9,19 @@ export async function POST(
 ) {
   try {
     const nodeName = decodeURIComponent(params.nodeName);
-    const nodesPath = join(process.cwd(), 'data', 'nodes');
+    
+    // Get selected space
+    const spacesPath = join(process.cwd(), 'spaces');
+    const selectedVersionPath = join(spacesPath, 'selected_version.txt');
+    let selectedVersion = 'v1';
+    try {
+      const selectedContent = await readFile(selectedVersionPath, 'utf-8');
+      selectedVersion = selectedContent.trim() || 'v1';
+    } catch (error) {
+      // Default to v1 if file doesn't exist
+    }
+    
+    const nodesPath = join(spacesPath, selectedVersion, 'ComfyUI', 'custom_nodes');
     const nodePath = join(nodesPath, nodeName);
 
     if (!existsSync(nodePath)) {
@@ -41,7 +54,19 @@ export async function DELETE(
 ) {
   try {
     const nodeName = decodeURIComponent(params.nodeName);
-    const nodesPath = join(process.cwd(), 'data', 'nodes');
+    
+    // Get selected space
+    const spacesPath = join(process.cwd(), 'spaces');
+    const selectedVersionPath = join(spacesPath, 'selected_version.txt');
+    let selectedVersion = 'v1';
+    try {
+      const selectedContent = await readFile(selectedVersionPath, 'utf-8');
+      selectedVersion = selectedContent.trim() || 'v1';
+    } catch (error) {
+      // Default to v1 if file doesn't exist
+    }
+    
+    const nodesPath = join(spacesPath, selectedVersion, 'ComfyUI', 'custom_nodes');
     const nodePath = join(nodesPath, nodeName);
     const disabledFile = join(nodePath, '.disabled');
 

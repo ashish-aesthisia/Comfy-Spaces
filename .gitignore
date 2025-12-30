@@ -10,11 +10,7 @@ logs.txt
 **/comfy-logs.txt
 comfy-logs.txt
 
-# Nodes directories inside data/nodes (all node repositories)
-data/nodes/*
-!data/nodes/.gitkeep
-
-# Spaces directories (ComfyUI and nodes are large)
+# Spaces directories (ComfyUI and custom_nodes are large)
 spaces/**/ComfyUI/
 spaces/**/nodes/
 

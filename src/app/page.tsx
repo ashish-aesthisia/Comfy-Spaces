@@ -2,9 +2,11 @@
 
 import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { Container, Title, Text, Select, Button, Alert, Group, Stack, Paper, ScrollArea, Badge } from '@mantine/core';
-import { RiCheckLine, RiErrorWarningLine, RiRefreshLine, RiCheckboxCircleFill, RiCloseLine, RiAddLine, RiFileCodeLine, RiGitBranchLine, RiArrowRightLine } from 'react-icons/ri';
+import { Container, Title, Text, Select, Button, Group, Stack, Paper, ScrollArea, Badge, Menu, ActionIcon, Modal, TextInput } from '@mantine/core';
+import { notifications } from '@mantine/notifications';
+import { RiCheckLine, RiErrorWarningLine, RiRefreshLine, RiCheckboxCircleFill, RiCloseLine, RiAddLine, RiFileCodeLine, RiGitBranchLine, RiArrowRightLine, RiMoreFill, RiPencilLine, RiDeleteBinLine, RiDownloadLine } from 'react-icons/ri';
 import CreateSpaceModal from './components/CreateSpaceModal';
+import ImportJsonModal from './components/ImportJsonModal';
 
 interface SpaceInfo {
   name: string; // spaceId (directory name)
@@ -30,13 +32,18 @@ export default function Home() {
   const [spaces, setSpaces] = useState<SpacesData | null>(null);
   const [selectedSpace, setSelectedSpace] = useState<string>('');
   const [isActivating, setIsActivating] = useState(false);
-  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [showLogs, setShowLogs] = useState(false);
   const [isComfyUIReady, setIsComfyUIReady] = useState(false);
   const logsEndRef = useRef<HTMLDivElement>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
   const [createSpaceModalOpened, setCreateSpaceModalOpened] = useState(false);
+  const [importJsonModalOpened, setImportJsonModalOpened] = useState(false);
+  const [renameModalOpened, setRenameModalOpened] = useState(false);
+  const [spaceToRename, setSpaceToRename] = useState<SpaceInfo | null>(null);
+  const [newSpaceName, setNewSpaceName] = useState('');
+  const [isRenaming, setIsRenaming] = useState(false);
+  const [spaceToDelete, setSpaceToDelete] = useState<SpaceInfo | null>(null);
 
   useEffect(() => {
     // Fetch spaces on component mount
@@ -48,7 +55,13 @@ export default function Home() {
       })
       .catch(err => {
         console.error('Error fetching spaces:', err);
-        setMessage({ type: 'error', text: 'Failed to load spaces' });
+        notifications.show({
+          title: 'Error',
+          message: 'Failed to load spaces',
+          color: 'red',
+          icon: <RiErrorWarningLine size={18} />,
+          autoClose: 5000,
+        });
       });
   }, []);
 
@@ -87,14 +100,19 @@ export default function Home() {
     }
     setIsActivating(false);
     setIsComfyUIReady(false);
-    setMessage({ type: 'error', text: 'Activation cancelled' });
+    notifications.show({
+      title: 'Cancelled',
+      message: 'Activation cancelled',
+      color: 'orange',
+      icon: <RiCloseLine size={18} />,
+      autoClose: 5000,
+    });
   };
 
   const handleActivate = async () => {
     if (!selectedSpace) return;
 
     setIsActivating(true);
-    setMessage(null);
     setLogs([]);
     setShowLogs(true);
     setIsComfyUIReady(false);
@@ -118,7 +136,13 @@ export default function Home() {
       const data = await response.json();
 
       if (!response.ok) {
-        setMessage({ type: 'error', text: data.error || 'Failed to activate space' });
+        notifications.show({
+          title: 'Error',
+          message: data.error || 'Failed to activate space',
+          color: 'red',
+          icon: <RiErrorWarningLine size={18} />,
+          autoClose: 5000,
+        });
         setIsActivating(false);
         return;
       }
@@ -151,7 +175,13 @@ export default function Home() {
           if (logEntry.message.includes('Activation cancelled by user')) {
             setIsActivating(false);
             setIsComfyUIReady(false);
-            setMessage({ type: 'error', text: 'Activation cancelled' });
+            notifications.show({
+              title: 'Cancelled',
+              message: 'Activation cancelled',
+              color: 'orange',
+              icon: <RiCloseLine size={18} />,
+              autoClose: 5000,
+            });
             return;
           }
           
@@ -177,6 +207,13 @@ export default function Home() {
           eventSource.close();
           eventSourceRef.current = null;
           setIsActivating(false);
+          notifications.show({
+            title: 'Error',
+            message: 'Failed to activate space',
+            color: 'red',
+            icon: <RiErrorWarningLine size={18} />,
+            autoClose: 5000,
+          });
         }
       };
 
@@ -184,7 +221,13 @@ export default function Home() {
       // They can manually navigate when ready
     } catch (error) {
       console.error('Error activating space:', error);
-      setMessage({ type: 'error', text: 'Failed to activate space' });
+      notifications.show({
+        title: 'Error',
+        message: 'Failed to activate space',
+        color: 'red',
+        icon: <RiErrorWarningLine size={18} />,
+        autoClose: 5000,
+      });
       setIsActivating(false);
     }
   };
@@ -222,6 +265,166 @@ export default function Home() {
   };
 
   const isActivateEnabled = !!selectedSpace;
+
+  const handleExportJson = async (space: SpaceInfo) => {
+    try {
+      const response = await fetch(`/api/spaces/${encodeURIComponent(space.name)}/export`);
+      if (!response.ok) {
+        const error = await response.json();
+        notifications.show({
+          title: 'Export Failed',
+          message: error.error || 'Failed to export space',
+          color: 'red',
+          icon: <RiErrorWarningLine size={18} />,
+          autoClose: 5000,
+        });
+        return;
+      }
+      
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `space-${space.name}.json`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      
+      notifications.show({
+        title: 'Export Successful',
+        message: `Space "${space.visibleName || space.name}" exported successfully`,
+        color: 'green',
+        icon: <RiCheckLine size={18} />,
+        autoClose: 5000,
+      });
+    } catch (error) {
+      console.error('Error exporting space:', error);
+      notifications.show({
+        title: 'Export Failed',
+        message: 'Failed to export space',
+        color: 'red',
+        icon: <RiErrorWarningLine size={18} />,
+        autoClose: 5000,
+      });
+    }
+  };
+
+  const handleRename = async () => {
+    if (!spaceToRename || !newSpaceName.trim()) {
+      return;
+    }
+
+    setIsRenaming(true);
+    try {
+      const response = await fetch(`/api/spaces/${encodeURIComponent(spaceToRename.name)}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ visibleName: newSpaceName.trim() }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        notifications.show({
+          title: 'Rename Failed',
+          message: data.error || 'Failed to rename space',
+          color: 'red',
+          icon: <RiErrorWarningLine size={18} />,
+          autoClose: 5000,
+        });
+        setIsRenaming(false);
+        return;
+      }
+
+      // Refresh spaces list
+      const res = await fetch('/api/spaces');
+      const spacesData: SpacesData = await res.json();
+      setSpaces(spacesData);
+      
+      notifications.show({
+        title: 'Rename Successful',
+        message: `Space renamed to "${newSpaceName.trim()}" successfully`,
+        color: 'green',
+        icon: <RiCheckLine size={18} />,
+        autoClose: 5000,
+      });
+      setRenameModalOpened(false);
+      setSpaceToRename(null);
+      setNewSpaceName('');
+    } catch (error) {
+      console.error('Error renaming space:', error);
+      notifications.show({
+        title: 'Rename Failed',
+        message: 'Failed to rename space',
+        color: 'red',
+        icon: <RiErrorWarningLine size={18} />,
+        autoClose: 5000,
+      });
+    } finally {
+      setIsRenaming(false);
+    }
+  };
+
+  const handleDelete = async (space: SpaceInfo) => {
+    if (!confirm(`Are you sure you want to delete space "${space.visibleName || space.name}"? This action cannot be undone.`)) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/spaces/${encodeURIComponent(space.name)}`, {
+        method: 'DELETE',
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        notifications.show({
+          title: 'Delete Failed',
+          message: data.error || 'Failed to delete space',
+          color: 'red',
+          icon: <RiErrorWarningLine size={18} />,
+          autoClose: 5000,
+        });
+        return;
+      }
+
+      // Refresh spaces list
+      const res = await fetch('/api/spaces');
+      const spacesData: SpacesData = await res.json();
+      setSpaces(spacesData);
+      
+      // If deleted space was selected, clear selection
+      if (selectedSpace === space.name) {
+        setSelectedSpace(spacesData.selectedVersion || '');
+      }
+      
+      notifications.show({
+        title: 'Delete Successful',
+        message: `Space "${space.visibleName || space.name}" deleted successfully`,
+        color: 'green',
+        icon: <RiCheckLine size={18} />,
+        autoClose: 5000,
+      });
+    } catch (error) {
+      console.error('Error deleting space:', error);
+      notifications.show({
+        title: 'Delete Failed',
+        message: 'Failed to delete space',
+        color: 'red',
+        icon: <RiErrorWarningLine size={18} />,
+        autoClose: 5000,
+      });
+    }
+  };
+
+  const openRenameModal = (space: SpaceInfo) => {
+    setSpaceToRename(space);
+    setNewSpaceName(space.visibleName || space.name);
+    setRenameModalOpened(true);
+  };
 
   return (
     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', backgroundColor: '#000000', paddingTop: '2rem', paddingBottom: '2rem' }}>
@@ -263,6 +466,7 @@ export default function Home() {
                   flex: 1,
                   textAlign: 'center',
                 }}
+                onClick={() => setImportJsonModalOpened(true)}
                 onMouseEnter={(e) => {
                   e.currentTarget.style.borderColor = '#555555';
                   e.currentTarget.style.backgroundColor = '#1a1a1a';
@@ -341,21 +545,104 @@ export default function Home() {
                   >
                     <Group justify="space-between" align="center" wrap="nowrap">
                       <Stack gap="xs" style={{ flex: 1, minWidth: 0 }}>
-                        <Group gap="xs" wrap="nowrap">
-                          <Text fw={500} c="#ffffff" size="sm">
-                            {space.visibleName || space.name}
-                          </Text>
-                          <Badge
-                            size="sm"
-                            variant="outline"
-                            style={{
-                              borderColor: '#555555',
-                              color: '#888888',
-                              backgroundColor: 'transparent',
-                            }}
-                          >
-                            ComfyUI {space.comfyUIVersion}
-                          </Badge>
+                        <Group gap="xs" wrap="nowrap" justify="space-between" align="center">
+                          <Group gap="xs" wrap="nowrap">
+                            <Text fw={500} c="#ffffff" size="sm">
+                              {space.visibleName || space.name}
+                            </Text>
+                            <Badge
+                              size="sm"
+                              variant="outline"
+                              style={{
+                                borderColor: '#555555',
+                                color: '#888888',
+                                backgroundColor: 'transparent',
+                              }}
+                            >
+                              ComfyUI {space.comfyUIVersion}
+                            </Badge>
+                          </Group>
+                          <Group gap="xs" wrap="nowrap">
+                            <Menu shadow="md" width={200} position="bottom-end">
+                              <Menu.Target>
+                                <ActionIcon
+                                  variant="subtle"
+                                  color="gray"
+                                  onClick={(e) => e.stopPropagation()}
+                                  style={{ color: '#888888' }}
+                                >
+                                  <RiMoreFill size={18} />
+                                </ActionIcon>
+                              </Menu.Target>
+                              <Menu.Dropdown style={{ backgroundColor: '#25262b', border: '1px solid #373a40' }}>
+                                <Menu.Item
+                                  leftSection={<RiDownloadLine size={16} />}
+                                  style={{ color: '#ffffff' }}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleExportJson(space);
+                                  }}
+                                >
+                                  Export Json
+                                </Menu.Item>
+                                <Menu.Item
+                                  leftSection={<RiPencilLine size={16} />}
+                                  style={{ color: '#ffffff' }}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    openRenameModal(space);
+                                  }}
+                                >
+                                  Rename
+                                </Menu.Item>
+                                <Menu.Item
+                                  leftSection={<RiDeleteBinLine size={16} />}
+                                  color="red"
+                                  style={{ color: '#ff4444' }}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDelete(space);
+                                  }}
+                                >
+                                  Delete
+                                </Menu.Item>
+                              </Menu.Dropdown>
+                            </Menu>
+                            {isActivating && selectedSpace === space.name ? (
+                              <Button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleCancel();
+                                }}
+                                variant="outline"
+                                size="xs"
+                                style={{
+                                  borderColor: '#ff4444',
+                                  color: '#ff4444',
+                                }}
+                                leftSection={<RiCloseLine size={14} />}
+                              >
+                                Cancel
+                              </Button>
+                            ) : (
+                              <RiArrowRightLine 
+                                size={20} 
+                                color="#0070f3"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (selectedSpace === space.name) {
+                                    handleActivate();
+                                  } else {
+                                    setSelectedSpace(space.name);
+                                    setShowLogs(false);
+                                    setLogs([]);
+                                    setIsComfyUIReady(false);
+                                  }
+                                }}
+                                style={{ cursor: 'pointer' }}
+                              />
+                            )}
+                          </Group>
                         </Group>
                         <Group gap="md" wrap="nowrap">
                           <Text size="xs" c="#888888">
@@ -369,40 +656,6 @@ export default function Home() {
                           </Text>
                         </Group>
                       </Stack>
-                      {isActivating && selectedSpace === space.name ? (
-                        <Button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleCancel();
-                          }}
-                          variant="outline"
-                          size="xs"
-                          style={{
-                            borderColor: '#ff4444',
-                            color: '#ff4444',
-                          }}
-                          leftSection={<RiCloseLine size={14} />}
-                        >
-                          Cancel
-                        </Button>
-                      ) : (
-                        <RiArrowRightLine 
-                          size={20} 
-                          color="#888888"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            if (selectedSpace === space.name) {
-                              handleActivate();
-                            } else {
-                              setSelectedSpace(space.name);
-                              setShowLogs(false);
-                              setLogs([]);
-                              setIsComfyUIReady(false);
-                            }
-                          }}
-                          style={{ cursor: 'pointer' }}
-                        />
-                      )}
                     </Group>
                   </Paper>
                 ))}
@@ -420,20 +673,6 @@ export default function Home() {
               </Stack>
             </Paper>
           ) : null}
-
-          {message && (
-            <Alert
-              icon={message.type === 'success' ? <RiCheckLine size={16} /> : <RiErrorWarningLine size={16} />}
-              style={{
-                backgroundColor: message.type === 'success' ? '#00d9ff' : '#ff4444',
-                color: '#000000',
-                border: 'none',
-              }}
-              size="sm"
-            >
-              {message.text}
-            </Alert>
-          )}
 
           {showLogs && selectedSpace && (
             <Paper p="md" style={{ backgroundColor: '#111111', border: '1px solid #333333' }}>
@@ -540,6 +779,103 @@ export default function Home() {
           }
         }}
       />
+
+      <ImportJsonModal
+        opened={importJsonModalOpened}
+        onClose={() => setImportJsonModalOpened(false)}
+        onSuccess={async () => {
+          // Refresh spaces list (but don't auto-activate)
+          try {
+            const res = await fetch('/api/spaces');
+            const data: SpacesData = await res.json();
+            setSpaces(data);
+            notifications.show({
+              title: 'Import Successful',
+              message: 'Space imported successfully. You can now activate it manually.',
+              color: 'green',
+              icon: <RiCheckLine size={18} />,
+              autoClose: 5000,
+            });
+          } catch (err) {
+            console.error('Error refreshing spaces:', err);
+            notifications.show({
+              title: 'Error',
+              message: 'Failed to refresh spaces list',
+              color: 'red',
+              icon: <RiErrorWarningLine size={18} />,
+              autoClose: 5000,
+            });
+          }
+        }}
+      />
+
+      <Modal
+        opened={renameModalOpened}
+        onClose={() => {
+          if (!isRenaming) {
+            setRenameModalOpened(false);
+            setSpaceToRename(null);
+            setNewSpaceName('');
+          }
+        }}
+        title={
+          <Text size="lg" fw={600} c="#ffffff">
+            Rename Space
+          </Text>
+        }
+        size="md"
+        closeOnClickOutside={!isRenaming}
+        closeOnEscape={!isRenaming}
+        styles={{
+          title: { color: '#ffffff' },
+          content: { backgroundColor: '#1a1b1e', borderRadius: '8px' },
+          header: { backgroundColor: '#25262b', borderBottom: '1px solid #373a40', padding: '20px' },
+          body: { backgroundColor: '#1a1b1e', padding: '24px' },
+        }}
+      >
+        <Stack gap="md">
+          <TextInput
+            label="Space Name"
+            placeholder="Enter new space name"
+            value={newSpaceName}
+            onChange={(e) => setNewSpaceName(e.currentTarget.value)}
+            disabled={isRenaming}
+            styles={{
+              label: { color: '#ffffff', marginBottom: '8px' },
+              input: {
+                backgroundColor: '#25262b',
+                border: '1px solid #373a40',
+                color: '#ffffff',
+                '&:focus': { borderColor: '#0070f3' },
+              },
+            }}
+          />
+          <Group justify="flex-end" mt="md">
+            <Button
+              variant="subtle"
+              onClick={() => {
+                setRenameModalOpened(false);
+                setSpaceToRename(null);
+                setNewSpaceName('');
+              }}
+              disabled={isRenaming}
+              style={{ color: '#888888' }}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleRename}
+              disabled={isRenaming || !newSpaceName.trim()}
+              style={{
+                backgroundColor: '#0070f3',
+                color: '#ffffff',
+              }}
+            >
+              {isRenaming ? 'Renaming...' : 'Rename'}
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
     </div>
   );
 }

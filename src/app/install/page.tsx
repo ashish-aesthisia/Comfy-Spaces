@@ -864,7 +864,7 @@ export default function InstallPage() {
                       </Group>
                     </Group>
                     <Text size="xs" c="#888888" mb="sm">
-                      data/nodes/{nodeName}/requirements.txt
+                      spaces/{selectedRevision}/ComfyUI/custom_nodes/{nodeName}/requirements.txt
                     </Text>
                     <Paper 
                       p="sm" 

@@ -2,10 +2,6 @@
 
 mkdir -p spaces
 
-if [ ! -d data/nodes ]; then
-  mkdir -p data/nodes
-fi
-
 if [ ! -d spaces/v1 ]; then
   mkdir -p spaces/v1
 fi

@@ -109,7 +109,7 @@ export async function GET(request: NextRequest) {
     }
 
     const spaceJsonPath = join(spacesPath, selectedVersion, 'space.json');
-    const nodeRequirementsPath = join(process.cwd(), 'data', 'nodes', nodeName, 'requirements.txt');
+    const nodeRequirementsPath = join(spacesPath, selectedVersion, 'ComfyUI', 'custom_nodes', nodeName, 'requirements.txt');
 
     // Check if space.json exists
     if (!existsSync(spaceJsonPath)) {

@@ -148,14 +148,14 @@ export async function GET(request: NextRequest) {
     // Process nodes from API
     for (const nodeName of nodeNamesFromApi) {
       const existsInDataNodes = nodesInDataDirSet.has(nodeName);
-      // Core nodes don't exist in data/nodes (they're default), so they're always active if in API
+      // Core nodes don't exist in custom_nodes (they're default), so they're always active if in API
       const isCoreNode = nodeName === 'ComfyUI-Core' || nodeName === 'core';
       
-      // Success: exists in API AND exists in data/nodes (or is core node)
-      // Active: exists in API (even if not in data/nodes, as it's working)
+      // Success: exists in API AND exists in custom_nodes (or is core node)
+      // Active: exists in API (even if not in custom_nodes, as it's working)
       const extensionPaths = extensionsByNode.get(nodeName) || [];
       
-      // Get git metadata if node exists in data/nodes
+      // Get git metadata if node exists in custom_nodes
       let gitMetadata = {};
       if (existsInDataNodes && !isCoreNode) {
         const actualNodeName = nodeName === 'ComfyUI-Core' ? 'core' : nodeName;
@@ -174,7 +174,7 @@ export async function GET(request: NextRequest) {
           disabled: disabledNodes.has(nodeName),
         });
       } else {
-        // Node exists in API but not in data/nodes - still active (working)
+        // Node exists in API but not in custom_nodes - still active (working)
         nodeStatuses.push({
           name: nodeName,
           status: 'active',
@@ -185,7 +185,7 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // Check for nodes in data/nodes that don't exist in API (failed)
+    // Check for nodes in custom_nodes that don't exist in API (failed)
     for (const nodeName of nodesInDataDir) {
       // Skip core nodes as they're special
       if (nodeName === 'ComfyUI-Core' || nodeName === 'core') {
