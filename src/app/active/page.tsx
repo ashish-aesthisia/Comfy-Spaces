@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { Container, Title, Text, Stack, Button, Grid, Card, Group, Menu, ActionIcon, Modal, ScrollArea, Paper, Badge } from '@mantine/core';
 import { useRouter } from 'next/navigation';
-import { RiHomeLine, RiCheckboxCircleFill, RiCloseCircleFill, RiDownloadLine, RiPencilLine, RiMoreFill, RiDeleteBinLine, RiStopCircleLine, RiHistoryLine, RiFileListLine, RiAddLine, RiArrowDownSLine, RiArrowUpSLine, RiExternalLinkLine } from 'react-icons/ri';
+import { RiHomeLine, RiCheckboxCircleFill, RiCloseCircleFill, RiDownloadLine, RiPencilLine, RiMoreFill, RiDeleteBinLine, RiStopCircleLine, RiHistoryLine, RiFileListLine, RiArrowDownSLine, RiArrowUpSLine, RiExternalLinkLine, RiAddLine, RiRefreshLine } from 'react-icons/ri';
 import LogSidebar from './components/LogSidebar';
 import NodeTreeModal from './components/NodeTreeModal';
 
@@ -120,6 +120,54 @@ export default function ActivePage() {
     } catch (error) {
       console.error(`Error ${currentlyDisabled ? 'enabling' : 'disabling'} node:`, error);
       alert(`Failed to ${currentlyDisabled ? 'enable' : 'disable'} node`);
+    }
+  };
+
+  const handleRestartComfyUI = async () => {
+    if (!selectedVersion) {
+      alert('No space is currently active');
+      return;
+    }
+
+    if (!confirm('Are you sure you want to restart ComfyUI? This will stop the current instance and start a new one.')) {
+      return;
+    }
+
+    try {
+      // Call restart endpoint to get the current version
+      const restartResponse = await fetch('/api/activate/restart', {
+        method: 'POST',
+      });
+
+      if (!restartResponse.ok) {
+        const data = await restartResponse.json();
+        alert(data.error || 'Failed to restart ComfyUI');
+        return;
+      }
+
+      const restartData = await restartResponse.json();
+      const versionToRestart = restartData.version || selectedVersion;
+
+      // Activate the space again (this will kill the existing process and restart)
+      const activateResponse = await fetch('/api/activate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ version: versionToRestart }),
+      });
+
+      if (!activateResponse.ok) {
+        const data = await activateResponse.json();
+        alert(data.error || 'Failed to restart ComfyUI');
+        return;
+      }
+
+      // Navigate to home page to see the activation logs
+      router.push('/');
+    } catch (error) {
+      console.error('Error restarting ComfyUI:', error);
+      alert('Failed to restart ComfyUI');
     }
   };
 
@@ -298,14 +346,12 @@ export default function ActivePage() {
               </Text>
             </Group>
             <Group gap="sm" align="center">
+              <Menu shadow="md" width={200} position="bottom-end">
+                <Menu.Target>
               <Button
-                component="a"
-                href="http://localhost:8188"
-                target="_blank"
-                rel="noopener noreferrer"
                 variant="subtle"
                 size="sm"
-                leftSection={<RiExternalLinkLine size={16} />}
+                    rightSection={<RiArrowDownSLine size={14} />}
                 style={{
                   color: '#0070f3',
                   fontWeight: 'bold',
@@ -313,6 +359,26 @@ export default function ActivePage() {
               >
                 Launch ComfyUI
               </Button>
+                </Menu.Target>
+                <Menu.Dropdown>
+                  <Menu.Item
+                    component="a"
+                    href="http://localhost:8188"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    leftSection={<RiExternalLinkLine size={16} />}
+                  >
+                    Open ComfyUI
+                  </Menu.Item>
+                  <Menu.Item
+                    onClick={handleRestartComfyUI}
+                    leftSection={<RiRefreshLine size={16} />}
+                    disabled={!selectedVersion}
+                  >
+                    Restart ComfyUI
+                  </Menu.Item>
+                </Menu.Dropdown>
+              </Menu>
               <Button
                 variant="outline"
                 size="sm"
@@ -423,27 +489,28 @@ export default function ActivePage() {
                   })()}
                 </Group>
                 <Group justify="space-between" align="center">
+                  <Title order={2}>Nodes</Title>
                   <Group gap="sm" align="center">
-                    <Title order={2}>Nodes</Title>
-                    <ActionIcon
-                      variant="outline"
+                    <Button
+                      variant="filled"
                       size="sm"
-                      onClick={() => router.push('/install')}
-                      style={{
-                        borderColor: '#0070f3',
-                        color: '#0070f3',
-                        borderRadius: '50%',
+                      leftSection={<RiAddLine size={16} />}
+                      onClick={() => {
+                        router.push('/install-node');
                       }}
-                      title="Install new Custom Node"
+                      style={{
+                        backgroundColor: '#0070f3',
+                        color: '#ffffff',
+                      }}
                     >
-                      <RiAddLine size={16} />
-                    </ActionIcon>
+                      Install Custom Node
+                    </Button>
+                    {nodes.length > 0 && (
+                      <Text size="sm" c="dimmed">
+                        {nodes.filter(n => n.status === 'active').length} active, {nodes.filter(n => n.status === 'failed').length} failed
+                      </Text>
+                    )}
                   </Group>
-                  {nodes.length > 0 && (
-                    <Text size="sm" c="dimmed">
-                      {nodes.filter(n => n.status === 'active').length} active, {nodes.filter(n => n.status === 'failed').length} failed
-                    </Text>
-                  )}
                 </Group>
               </Stack>
               {error ? (
@@ -455,11 +522,11 @@ export default function ActivePage() {
               ) : nodes.length === 0 ? (
                 <Text c="dimmed">No nodes found</Text>
               ) : (
-                <Grid gutter="md">
+                <Grid gutter="sm">
                   {nodes.map((node, index) => (
-                    <Grid.Col key={index} span={{ base: 12, sm: 6, md: 4, lg: 3 }}>
+                    <Grid.Col key={index} span={{ base: 12, sm: 6, md: 4, lg: 2 }}>
                       <Card
-                        padding="md"
+                        padding="sm"
                         radius="md"
                         style={{
                           backgroundColor: '#25262b',
@@ -486,16 +553,16 @@ export default function ActivePage() {
                         }}
                       >
                         <Stack gap="xs">
-                          <Group gap="sm" align="center" justify="space-between">
-                            <Group gap="sm" align="center" style={{ flex: 1 }}>
+                          <Group gap="xs" align="center" justify="space-between">
+                            <Group gap="xs" align="center" style={{ flex: 1 }}>
                               {node.status === 'active' ? (
-                                <RiCheckboxCircleFill size={20} color="#51cf66" />
+                                <RiCheckboxCircleFill size={14} color="#51cf66" />
                               ) : node.status === 'failed' ? (
-                                <RiCloseCircleFill size={20} color="#ff6b6b" />
+                                <RiCloseCircleFill size={14} color="#ff6b6b" />
                               ) : (
-                                <RiCloseCircleFill size={20} color="#ff6b6b" />
+                                <RiCloseCircleFill size={14} color="#ff6b6b" />
                               )}
-                              <Text size="sm" fw={500} c="gray.0" style={{ flex: 1 }}>
+                              <Text size="xs" fw={500} c="gray.0" style={{ flex: 1 }}>
                                 {node.name}
                               </Text>
                             </Group>
@@ -504,12 +571,12 @@ export default function ActivePage() {
                                 <ActionIcon
                                   variant="subtle"
                                   color="blue"
-                                  size="sm"
+                                  size="xs"
                                   onClick={() => handleUpdate(node)}
                                   title="Update"
                                   style={{ color: '#4dabf7' }}
                                 >
-                                  <RiPencilLine size={16} />
+                                  <RiPencilLine size={12} />
                                 </ActionIcon>
                               )}
                               <Menu shadow="md" width={200} position="bottom-end">
@@ -517,11 +584,11 @@ export default function ActivePage() {
                                   <ActionIcon
                                     variant="subtle"
                                     color="gray"
-                                    size="sm"
+                                    size="xs"
                                     title="More options"
                                     style={{ color: '#ffffff' }}
                                   >
-                                    <RiMoreFill size={16} />
+                                    <RiMoreFill size={12} />
                                   </ActionIcon>
                                 </Menu.Target>
                                 <Menu.Dropdown>

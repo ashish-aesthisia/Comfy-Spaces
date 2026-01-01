@@ -267,15 +267,15 @@ export async function GET(request: NextRequest) {
     await writeFile(tempMergedPath, mergedContent, 'utf-8');
     
     // Run pip-compile --dry-run to check for conflicts
-    // Use the venv Python from v1 since pip-tools is installed there
+    // Use the venv Python from the selected space since pip-tools is installed there
     let conflicts: string[] = [];
     let conflictDetails = '';
     let hasConflicts = false;
     
     try {
-      // Determine Python executable - use venv Python from v1 if available
+      // Determine Python executable - use venv Python from selected space if available
       const isWindows = process.platform === 'win32';
-      const venvPath = join(process.cwd(), 'spaces', 'v1', 'venv');
+      const venvPath = join(spacesPath, selectedVersion, 'venv');
       let pythonExec = 'python3';
       
       if (existsSync(venvPath)) {

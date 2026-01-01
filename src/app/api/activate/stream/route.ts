@@ -112,6 +112,81 @@ function getVersion(
   });
 }
 
+async function updateRequirementsTxt(
+  pipExec: string,
+  spacePath: string,
+  controller: ReadableStreamDefaultController,
+  encoder: TextEncoder,
+  logFile: string
+): Promise<void> {
+  try {
+    sendLog(controller, encoder, `[APP] Updating requirements.txt with installed packages...`, logFile);
+    
+    const pipListProcess = spawn(pipExec, ['list', '--format=freeze'], {
+      cwd: spacePath,
+      env: { ...process.env },
+      shell: true,
+    });
+
+    let pipListOutput = '';
+    let pipListError = '';
+
+    pipListProcess.stdout?.on('data', (data) => {
+      pipListOutput += data.toString();
+    });
+
+    pipListProcess.stderr?.on('data', (data) => {
+      pipListError += data.toString();
+    });
+
+    const pipListCode = await new Promise<number>((resolve) => {
+      pipListProcess.on('close', (code) => {
+        resolve(code || 0);
+      });
+      pipListProcess.on('error', () => {
+        resolve(1);
+      });
+    });
+
+    if (pipListCode === 0 && pipListOutput.trim()) {
+      const requirementsFilePath = join(spacePath, 'requirements.txt');
+      writeFileSync(requirementsFilePath, pipListOutput, 'utf-8');
+      sendLog(controller, encoder, `[APP] requirements.txt updated successfully`, logFile);
+
+      // Also update space.json dependencies
+      const spaceJsonPath = join(spacePath, 'space.json');
+      if (existsSync(spaceJsonPath)) {
+        try {
+          const spaceJsonContent = readFileSync(spaceJsonPath, 'utf-8');
+          const spaceJson = JSON.parse(spaceJsonContent);
+          
+          // Parse pip list output into dependencies array
+          const dependencies = pipListOutput
+            .trim()
+            .split('\n')
+            .filter(line => line.trim().length > 0)
+            .map(line => line.trim());
+          
+          // Update dependencies in space.json
+          spaceJson.dependencies = dependencies;
+          
+          // Write updated space.json
+          writeFileSync(spaceJsonPath, JSON.stringify(spaceJson, null, 2), 'utf-8');
+          sendLog(controller, encoder, `[APP] space.json dependencies updated successfully`, logFile);
+        } catch (error: any) {
+          sendLog(controller, encoder, `[WARN] Error updating space.json: ${error.message}`, logFile);
+        }
+      } else {
+        sendLog(controller, encoder, `[INFO] space.json not found, skipping dependencies update`, logFile);
+      }
+    } else {
+      sendLog(controller, encoder, `[WARN] Failed to update requirements.txt: ${pipListError || 'Unknown error'}`, logFile);
+    }
+  } catch (error: any) {
+    sendLog(controller, encoder, `[WARN] Error updating requirements.txt: ${error.message}`, logFile);
+  }
+}
+
 async function checkPortInUse(port: number): Promise<boolean> {
   try {
     const isWindows = process.platform === 'win32';
@@ -515,8 +590,14 @@ export async function GET(request: NextRequest) {
               } catch (error) {
                 // Ignore cleanup errors
               }
+
+              // Update requirements.txt with pip list
+              await updateRequirementsTxt(pipExec, spacePath, controller, encoder, logFilePath);
             } else {
               sendLog(controller, encoder, `[INFO] No dependencies found in space.json`, logFilePath);
+              
+              // Still update requirements.txt with currently installed packages
+              await updateRequirementsTxt(pipExec, spacePath, controller, encoder, logFilePath);
             }
           } catch (error: any) {
             sendLog(controller, encoder, `[WARN] Error reading space.json: ${error.message}`, logFilePath);
@@ -536,29 +617,26 @@ export async function GET(request: NextRequest) {
         // Use the venv python to run ComfyUI
         // Check if there are environment variables for ComfyUI launch command
         let comfyUIArgs = ['main.py'];
-        let comfyLogFile: string | null = null;
         let useSystemPython = false;
         
         // Check for COMFY_CMD first, then COMFYUI_LAUNCH_ARGS
         const comfyCmd = process.env.COMFY_CMD || process.env.COMFYUI_LAUNCH_ARGS;
         if (comfyCmd) {
           // Parse the command - handle shell redirection like "> ./data/comfy-logs.txt"
+          // Note: We ignore log file redirections and always use space/comfy-logs.txt
           const parts = comfyCmd.trim().split(/\s+/);
           const args: string[] = [];
-          let foundRedirect = false;
           
           for (let i = 0; i < parts.length; i++) {
             const part = parts[i];
             if (part === '>' && i + 1 < parts.length) {
-              // Found redirection operator, next part is the log file
-              comfyLogFile = parts[i + 1];
-              foundRedirect = true;
-              break;
+              // Found redirection operator, skip it and the log file path
+              // We'll use our own log file path instead
+              i++; // Skip the log file path
+              continue;
             } else if (part.startsWith('>')) {
-              // Redirection without space: ">file.txt"
-              comfyLogFile = part.substring(1);
-              foundRedirect = true;
-              break;
+              // Redirection without space: ">file.txt", skip it
+              continue;
             } else if (part === 'python3' || part === 'python') {
               // If using system python, note it but we'll still use venv python
               useSystemPython = (part === 'python3');
@@ -574,27 +652,10 @@ export async function GET(request: NextRequest) {
           }
           
           sendLog(controller, encoder, `[APP] Using custom ComfyUI launch command from environment`, logFilePath);
-          if (comfyLogFile) {
-            sendLog(controller, encoder, `[APP] ComfyUI output will be logged to: ${comfyLogFile}`, logFilePath);
-          }
         }
         
-        // Default log file if not specified
-        if (!comfyLogFile) {
-          comfyLogFile = comfyLogFilePath;
-        } else {
-          // Resolve relative paths (handle ./ and ../)
-          if (!comfyLogFile.startsWith('/')) {
-            // Remove leading ./ if present
-            const cleanPath = comfyLogFile.startsWith('./') ? comfyLogFile.substring(2) : comfyLogFile;
-            comfyLogFile = join(process.cwd(), cleanPath);
-          }
-        }
-        
-        // Ensure comfyLogFile is within the space directory
-        if (!comfyLogFile || comfyLogFile === comfyLogFilePath) {
-          comfyLogFile = comfyLogFilePath;
-        }
+        // Always use the space directory's comfy-logs.txt
+        const comfyLogFile = comfyLogFilePath;
         
         // Ensure log file directory exists
         const logFileDir = join(comfyLogFile, '..');

@@ -64,10 +64,18 @@ export default function InstallPage() {
       const branchParam = params.get('branch');
       const commitIdParam = params.get('commitId');
       
-      if (urlParam) {
-        setGithubUrl(urlParam);
-        setIsUpdate(true);
+      // Only allow updates - require githubUrl parameter
+      if (!urlParam) {
+        setMessage({ type: 'error', text: 'Update requires a GitHub URL. Please update an existing node from the nodes page.' });
+        setTimeout(() => {
+          router.push('/active');
+        }, 2000);
+        return;
       }
+      
+      setGithubUrl(urlParam);
+      setIsUpdate(true);
+      
       if (branchParam) {
         setBranch(branchParam);
       }
@@ -85,7 +93,7 @@ export default function InstallPage() {
       .catch(err => {
         console.error('Error fetching selected revision:', err);
       });
-  }, []);
+  }, [router]);
 
   // Auto-scroll to bottom when new logs arrive
   useEffect(() => {
@@ -190,12 +198,15 @@ export default function InstallPage() {
           
           // Check if clone or update is complete
           if (logEntry.message.includes('Clone completed successfully') || 
-              logEntry.message.includes('Update completed successfully')) {
+              logEntry.message.includes('Update completed successfully') ||
+              logEntry.message.includes('Installation process finished')) {
             setIsCloning(false);
             setCloneComplete(true);
             setShowLogs(false); // Hide logs when clone/update completes
-            // Fetch diff
-            fetchDiff(data.nodeName);
+            // Small delay to ensure all messages are processed before fetching diff
+            setTimeout(() => {
+              fetchDiff(data.nodeName);
+            }, 500);
           }
         } catch (error) {
           console.error('Error parsing log data:', error);
@@ -203,22 +214,39 @@ export default function InstallPage() {
       };
 
       eventSource.onerror = (error) => {
-        console.error('EventSource error:', error);
-        // If stream closes normally (readyState === 2), clone might have completed
-        if (eventSource.readyState === EventSource.CLOSED && !cloneComplete) {
-          // Stream closed normally, try to fetch diff
+        // EventSource fires onerror when the stream closes, even on normal closure
+        // Check if we've already received a completion message
+        if (cloneComplete) {
+          // We already processed completion, so this is just the normal stream closure
+          // No need to log or show error
+          if (eventSourceRef.current) {
+            eventSource.close();
+            eventSourceRef.current = null;
+          }
+          return;
+        }
+
+        // If we haven't received completion yet, check the readyState
+        if (eventSource.readyState === EventSource.CLOSED) {
+          // Stream closed normally - might have missed the completion message
+          // Try to fetch diff as fallback
           if (data.nodeName) {
             setIsCloning(false);
             setCloneComplete(true);
             fetchDiff(data.nodeName);
           }
+        } else {
+          // readyState is CONNECTING (0) or OPEN (1) but we got an error
+          // This indicates a connection problem, not a normal closure
+          console.error('EventSource connection error:', error);
+          setMessage({ type: 'error', text: 'Connection to installation stream lost. Please check if the installation completed.' });
+          setIsCloning(false);
         }
+        
+        // Clean up the EventSource reference
         if (eventSourceRef.current) {
           eventSource.close();
           eventSourceRef.current = null;
-          if (!cloneComplete) {
-            setIsCloning(false);
-          }
         }
       };
     } catch (error) {
@@ -443,86 +471,85 @@ export default function InstallPage() {
       <Container size="xl" py="xl" style={{ width: '100%' }}>
         <Stack gap="md">
           <Group justify="space-between" align="center">
-            <Title order={2} c="#ffffff">{isUpdate ? 'Update Custom Node' : 'Install Custom Node'}</Title>
+            <Title order={2} c="#ffffff">Update Custom Node</Title>
             <Button
               variant="subtle"
               leftSection={<RiHomeLine size={16} />}
-              onClick={() => router.push('/')}
+              onClick={() => router.push('/active')}
               size="sm"
               style={{ color: '#ffffff' }}
             >
-              Home
+              Back to Nodes
             </Button>
           </Group>
 
-          <Paper p="md" style={{ backgroundColor: '#111111', border: '1px solid #333333' }}>
-            <form onSubmit={handleSubmit}>
-              <Stack gap="md">
-                <TextInput
-                  label="Github URL"
-                  placeholder="https://github.com/user/repo"
-                  value={githubUrl}
-                  onChange={(e) => setGithubUrl(e.target.value)}
-                  required
-                  disabled={isCloning}
-                  styles={{
-                    label: { color: '#ffffff' },
-                    input: { backgroundColor: '#1a1b1e', color: '#ffffff', borderColor: '#373a40' },
-                  }}
-                />
-                <TextInput
-                  label="Commit ID (optional)"
-                  placeholder="Leave empty to use latest"
-                  value={commitId}
-                  onChange={(e) => setCommitId(e.target.value)}
-                  disabled={isCloning}
-                  styles={{
-                    label: { color: '#ffffff' },
-                    input: { backgroundColor: '#1a1b1e', color: '#ffffff', borderColor: '#373a40' },
-                  }}
-                />
-                <TextInput
-                  label="Branch (optional)"
-                  placeholder="Leave empty to use default branch"
-                  value={branch}
-                  onChange={(e) => setBranch(e.target.value)}
-                  disabled={isCloning}
-                  styles={{
-                    label: { color: '#ffffff' },
-                    input: { backgroundColor: '#1a1b1e', color: '#ffffff', borderColor: '#373a40' },
-                  }}
-                />
-                <Group justify="flex-end">
-                  {isCloning && (
-                    <Button
-                      onClick={handleCancel}
-                      variant="outline"
-                      style={{
-                        borderColor: '#ff4444',
-                        color: '#ff4444',
-                      }}
-                      leftSection={<RiCloseLine size={16} />}
-                      size="sm"
-                    >
-                      Cancel
-                    </Button>
-                  )}
-                  <Button
-                    type="submit"
-                    disabled={isCloning || !githubUrl.trim()}
-                    loading={isCloning}
-                    size="sm"
-                    style={{
-                      backgroundColor: !isCloning && githubUrl.trim() ? '#0070f3' : undefined,
-                      color: (isCloning || !githubUrl.trim()) ? '#000000' : '#ffffff',
+          {githubUrl && (
+            <Paper p="md" style={{ backgroundColor: '#111111', border: '1px solid #333333' }}>
+              <form onSubmit={handleSubmit}>
+                <Stack gap="md">
+                  <TextInput
+                    label="Github URL"
+                    value={githubUrl}
+                    disabled
+                    styles={{
+                      label: { color: '#ffffff' },
+                      input: { backgroundColor: '#1a1b1e', color: '#888888', borderColor: '#373a40' },
                     }}
-                  >
-                    {isUpdate ? 'Update & Rescan' : 'Install'}
-                  </Button>
-                </Group>
-              </Stack>
-            </form>
-          </Paper>
+                  />
+                  <TextInput
+                    label="Commit ID (optional)"
+                    placeholder="Leave empty to use latest"
+                    value={commitId}
+                    onChange={(e) => setCommitId(e.target.value)}
+                    disabled={isCloning}
+                    styles={{
+                      label: { color: '#ffffff' },
+                      input: { backgroundColor: '#1a1b1e', color: '#ffffff', borderColor: '#373a40' },
+                    }}
+                  />
+                  <TextInput
+                    label="Branch (optional)"
+                    placeholder="Leave empty to use default branch"
+                    value={branch}
+                    onChange={(e) => setBranch(e.target.value)}
+                    disabled={isCloning}
+                    styles={{
+                      label: { color: '#ffffff' },
+                      input: { backgroundColor: '#1a1b1e', color: '#ffffff', borderColor: '#373a40' },
+                    }}
+                  />
+                  <Group justify="flex-end">
+                    {isCloning && (
+                      <Button
+                        onClick={handleCancel}
+                        variant="outline"
+                        style={{
+                          borderColor: '#ff4444',
+                          color: '#ff4444',
+                        }}
+                        leftSection={<RiCloseLine size={16} />}
+                        size="sm"
+                      >
+                        Cancel
+                      </Button>
+                    )}
+                    <Button
+                      type="submit"
+                      disabled={isCloning || !githubUrl.trim()}
+                      loading={isCloning}
+                      size="sm"
+                      style={{
+                        backgroundColor: !isCloning && githubUrl.trim() ? '#0070f3' : undefined,
+                        color: (isCloning || !githubUrl.trim()) ? '#000000' : '#ffffff',
+                      }}
+                    >
+                      Update & Rescan
+                    </Button>
+                  </Group>
+                </Stack>
+              </form>
+            </Paper>
+          )}
 
           {message && (
             <Alert
@@ -755,7 +782,7 @@ export default function InstallPage() {
                       </Group>
                     </Group>
                     <Text size="xs" c="#888888" mb="sm">
-                      data/revisions/{selectedRevision}/requirements.bkp
+                      spaces/{selectedRevision}/requirements.bkp
                     </Text>
                     <Paper 
                       p="sm" 

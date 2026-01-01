@@ -105,18 +105,21 @@ export async function GET(request: NextRequest) {
       try {
         const isUpdate = existsSync(nodePath) && existsSync(join(nodePath, '.git'));
         
-        if (isUpdate) {
-          sendLog(controller, encoder, `[APP] Updating existing node ${nodeName}...`);
-        } else {
-          sendLog(controller, encoder, `[APP] Starting clone of ${githubUrl}...`);
+        if (!isUpdate) {
+          sendLog(controller, encoder, `[ERROR] Node ${nodeName} does not exist. New installations are not supported.`);
+          controller.close();
+          return;
         }
+
+        sendLog(controller, encoder, `[APP] Updating existing node ${nodeName}...`);
 
         if (isCancelled) {
           controller.close();
           return;
         }
 
-        if (isUpdate) {
+        // Update existing repository
+        // First, fetch latest changes
           // Update existing repository
           // First, fetch latest changes
           sendLog(controller, encoder, `[APP] Fetching latest changes...`);
@@ -390,166 +393,8 @@ export async function GET(request: NextRequest) {
           return;
         }
 
-        // Build git clone command with progress flags
-        const cloneArgs = [
-          'clone',
-          '--progress', // Force progress output even when not a TTY
-          '--verbose',  // Show detailed progress
-          githubUrl,
-          nodePath
-        ];
-        
-        // If branch is specified, add it
-        if (branch) {
-          cloneArgs.push('--branch', branch);
-        }
-
-        // Clone the repository with progress output
-        // Git progress goes to stderr, so we need to capture both stdout and stderr
-        const cloneProcess = spawn('git', cloneArgs, {
-          cwd: nodesPath,
-          env: { 
-            ...process.env,
-            GIT_PROGRESS_FORCE: '1', // Force progress output
-            GIT_TERMINAL_PROMPT: '0', // Disable terminal prompts
-          },
-          shell: true,
-        });
-
-        const cloneProcessKill = () => {
-          if (!cloneProcess.killed) {
-            cloneProcess.kill('SIGTERM');
-          }
-        };
-        runningProcesses.push({ process: cloneProcess, kill: cloneProcessKill });
-
-        // Git sends progress to stderr, so we need to handle both streams
-        let stdoutBuffer = '';
-        let stderrBuffer = '';
-
-        cloneProcess.stdout?.on('data', (data) => {
-          const output = data.toString();
-          stdoutBuffer += output;
-          // Process line by line for better formatting
-          const lines = stdoutBuffer.split('\n');
-          stdoutBuffer = lines.pop() || ''; // Keep incomplete line in buffer
-          lines.forEach(line => {
-            if (line.trim()) {
-              sendLog(controller, encoder, line.trim());
-            }
-          });
-        });
-
-        cloneProcess.stderr?.on('data', (data) => {
-          const output = data.toString();
-          stderrBuffer += output;
-          // Process line by line, git progress comes through stderr
-          const lines = stderrBuffer.split('\n');
-          stderrBuffer = lines.pop() || ''; // Keep incomplete line in buffer
-          lines.forEach(line => {
-            if (line.trim()) {
-              // Git progress lines often have \r for overwriting, clean them up
-              const cleanLine = line.trim().replace(/\r/g, '');
-              if (cleanLine) {
-                sendLog(controller, encoder, cleanLine);
-              }
-            }
-          });
-        });
-
-        const cloneCode = await new Promise<number>((resolve) => {
-          cloneProcess.on('close', (code) => {
-            const index = runningProcesses.findIndex(p => p.process === cloneProcess);
-            if (index !== -1) {
-              runningProcesses.splice(index, 1);
-            }
-            resolve(code || 0);
-          });
-          cloneProcess.on('error', () => {
-            const index = runningProcesses.findIndex(p => p.process === cloneProcess);
-            if (index !== -1) {
-              runningProcesses.splice(index, 1);
-            }
-            resolve(1);
-          });
-        });
-
-        if (isCancelled) {
-          controller.close();
-          return;
-        }
-
-        if (cloneCode !== 0) {
-          sendLog(controller, encoder, `[ERROR] Failed to clone repository`);
-          controller.close();
-          return;
-        }
-
-        sendLog(controller, encoder, `[APP] Repository cloned successfully`);
-
-        // If commit ID is specified, checkout that commit
-        if (commitId) {
-          sendLog(controller, encoder, `[APP] Checking out commit ${commitId}...`);
-          
-          const checkoutProcess = spawn('git', ['checkout', commitId], {
-            cwd: nodePath,
-            env: { ...process.env },
-            shell: true,
-          });
-
-          const checkoutProcessKill = () => {
-            if (!checkoutProcess.killed) {
-              checkoutProcess.kill('SIGTERM');
-            }
-          };
-          runningProcesses.push({ process: checkoutProcess, kill: checkoutProcessKill });
-
-          checkoutProcess.stdout?.on('data', (data) => {
-            const output = data.toString();
-            sendLog(controller, encoder, output.trim());
-          });
-
-          checkoutProcess.stderr?.on('data', (data) => {
-            const output = data.toString();
-            sendLog(controller, encoder, output.trim());
-          });
-
-          const checkoutCode = await new Promise<number>((resolve) => {
-            checkoutProcess.on('close', (code) => {
-              const index = runningProcesses.findIndex(p => p.process === checkoutProcess);
-              if (index !== -1) {
-                runningProcesses.splice(index, 1);
-              }
-              resolve(code || 0);
-            });
-            checkoutProcess.on('error', () => {
-              const index = runningProcesses.findIndex(p => p.process === checkoutProcess);
-              if (index !== -1) {
-                runningProcesses.splice(index, 1);
-              }
-              resolve(1);
-            });
-          });
-
-          if (isCancelled) {
-            controller.close();
-            return;
-          }
-
-          if (checkoutCode !== 0) {
-            sendLog(controller, encoder, `[ERROR] Failed to checkout commit ${commitId}`);
-            controller.close();
-            return;
-          }
-
-          sendLog(controller, encoder, `[APP] Checked out commit ${commitId} successfully`);
-        }
-
-        sendLog(controller, encoder, `[APP] Clone completed successfully`);
-        controller.close();
-
       } catch (error: any) {
-        sendLog(controller, encoder, `[ERROR] Clone failed: ${error.message}`);
+        sendLog(controller, encoder, `[ERROR] Update failed: ${error.message}`);
         controller.close();
       }
     },

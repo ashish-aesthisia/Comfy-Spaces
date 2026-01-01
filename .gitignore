@@ -1,18 +1,5 @@
-# Virtual environments
-spaces/**/venv/
-venv/
-**/venv/
-**/venv/**
-
-# Log files
-**/logs.txt
-logs.txt
-**/comfy-logs.txt
-comfy-logs.txt
-
-# Spaces directories (ComfyUI and custom_nodes are large)
-spaces/**/ComfyUI/
-spaces/**/nodes/
+__pycache__/
+*.py[cod]
 
 .next/
 node_modules/
@@ -25,12 +12,10 @@ node_modules/
 # macOS
 .DS_Store
 
+#spaces
+spaces/**/ComfyUI/
+spaces/**/venv/
+spaces/**/comfy-logs.txt
+spaces/**/logs.txt
+
 # Windows
-Thumbs.db
-ehthumbs.db
-
-# Linux
-.directory
-
-# Other
-data/temp/

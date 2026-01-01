@@ -38,6 +38,7 @@
     "commitId": null,
     "releaseTag": "v0.5.1",
     "createdAt": "2025-12-30T10:13:08.336Z",
-    "comfyUISource": "release"
+    "comfyUISource": "release",
+    "isDefault": true
   }
 }

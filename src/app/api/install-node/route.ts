@@ -2,6 +2,10 @@ import { NextResponse } from 'next/server';
 import { join } from 'path';
 import { existsSync, mkdirSync } from 'fs';
 import { readFile } from 'fs/promises';
+import { promisify } from 'util';
+import { exec } from 'child_process';
+
+const execAsync = promisify(exec);
 
 export async function POST(request: Request) {
   try {
@@ -44,27 +48,58 @@ export async function POST(request: Request) {
       mkdirSync(nodesPath, { recursive: true });
     }
 
-    // Check if this is an update (node already exists)
-    const isUpdate = existsSync(nodePath) && existsSync(join(nodePath, '.git'));
-
-    if (!isUpdate) {
+    // Check if node already exists
+    if (existsSync(nodePath)) {
       return NextResponse.json(
-        { error: 'Node does not exist. New installations are not supported. Only updates to existing nodes are allowed.' },
+        { error: `Node ${nodeName} already exists. Use the update feature instead.` },
         { status: 400 }
+      );
+    }
+
+    // Clone the repository
+    try {
+      // Ensure the URL ends with .git or add it
+      let cloneUrl = githubUrl.trim();
+      if (!cloneUrl.endsWith('.git')) {
+        cloneUrl = cloneUrl.endsWith('/') ? `${cloneUrl}.git` : `${cloneUrl}.git`;
+      }
+
+      if (branch) {
+        // Clone specific branch
+        await execAsync(`git clone --branch ${branch} --depth 1 ${cloneUrl} ${nodePath}`);
+      } else {
+        // Clone default branch
+        await execAsync(`git clone --depth 1 ${cloneUrl} ${nodePath}`);
+      }
+
+      // Checkout specific commit if provided (and not using branch)
+      if (commitId && !branch) {
+        await execAsync(`git checkout ${commitId}`, { cwd: nodePath });
+      }
+    } catch (error: any) {
+      // Clean up on error
+      try {
+        const { rmSync } = require('fs');
+        if (existsSync(nodePath)) {
+          rmSync(nodePath, { recursive: true, force: true });
+        }
+      } catch {}
+      
+      return NextResponse.json(
+        { error: `Failed to clone repository: ${error.message}` },
+        { status: 500 }
       );
     }
 
     return NextResponse.json({ 
       success: true, 
       nodeName,
-      githubUrl,
-      commitId: commitId || null,
-      branch: branch || null,
+      message: `Node ${nodeName} installed successfully`,
     });
   } catch (error) {
-    console.error('Error preparing install:', error);
+    console.error('Error installing node:', error);
     return NextResponse.json(
-      { error: 'Failed to prepare install' },
+      { error: `Failed to install node: ${error instanceof Error ? error.message : 'Unknown error'}` },
       { status: 500 }
     );
   }
