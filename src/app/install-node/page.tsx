@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Container, Title, Group, ActionIcon, Paper, Stack, TextInput, Button, Alert, Text, Collapse, Badge, Divider, Checkbox } from '@mantine/core';
 import { RiArrowLeftLine, RiCheckLine, RiErrorWarningLine, RiArrowDownSLine, RiArrowUpSLine, RiShieldCheckLine, RiInformationLine } from 'react-icons/ri';
@@ -37,6 +37,10 @@ export default function InstallNodePage() {
   const [showLogs, setShowLogs] = useState(false);
   const [logs, setLogs] = useState<string[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
+  const [isRestarting, setIsRestarting] = useState(false);
+  const [selectedVersion, setSelectedVersion] = useState<string>('');
+  const [analysisStatus, setAnalysisStatus] = useState<string>('');
+  const restartEventSourceRef = useRef<EventSource | null>(null);
 
   const getStatusBadge = (status?: DependencyStatus) => {
     if (!status) return null;
@@ -79,8 +83,10 @@ export default function InstallNodePage() {
     setDependencies(updatedDeps);
   };
 
-  const handleAnalyze = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleAnalyze = async (e?: React.FormEvent) => {
+    if (e) {
+      e.preventDefault();
+    }
     
     if (!githubUrl.trim()) {
       setMessage({ type: 'error', text: 'Github URL is required' });
@@ -90,6 +96,7 @@ export default function InstallNodePage() {
     setIsAnalyzing(true);
     setMessage(null);
     setDependencies(null);
+    setAnalysisStatus('Fetching requirements.txt...');
 
     try {
       const response = await fetch('/api/install-node/analyze', {
@@ -104,20 +111,31 @@ export default function InstallNodePage() {
         }),
       });
 
+      setAnalysisStatus('Analysis in progress...');
+
       const data = await response.json();
 
       if (!response.ok) {
         setMessage({ type: 'error', text: data.error || 'Failed to analyze dependencies' });
         setIsAnalyzing(false);
+        setAnalysisStatus('');
         return;
       }
 
-      setDependencies(data.dependencies || []);
+      // Handle case where requirements.txt doesn't exist
+      if (data.noRequirementsFile) {
+        setDependencies([]);
+        setMessage({ type: 'success', text: 'No requirements.txt found. You can install the node without dependencies.' });
+      } else {
+        setDependencies(data.dependencies || []);
+      }
       setIsAnalyzing(false);
+      setAnalysisStatus('');
     } catch (error) {
       console.error('Error analyzing dependencies:', error);
       setMessage({ type: 'error', text: 'Failed to analyze dependencies' });
       setIsAnalyzing(false);
+      setAnalysisStatus('');
     }
   };
 
@@ -198,15 +216,13 @@ export default function InstallNodePage() {
               if (data.message) {
                 setLogs(prev => [...prev, data.message]);
                 
-                // Check for completion
-                if (data.message === '[COMPLETE]') {
+                // Check for installation completion - then restart ComfyUI
+                if (data.message === '[INSTALL_COMPLETE]') {
                   setIsStreaming(false);
                   setIsInstalling(false);
                   
-                  // Redirect to active page
-                  setTimeout(() => {
-                    router.push('/active');
-                  }, 2000);
+                  // Restart ComfyUI
+                  await restartComfyUI();
                   return;
                 }
               }
@@ -232,6 +248,196 @@ export default function InstallNodePage() {
       newExpanded.add(depName);
     }
     setExpandedDeps(newExpanded);
+  };
+
+  // Load URL parameters and selected version on mount, auto-analyze if URL params present
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const urlParam = params.get('githubUrl');
+      const branchParam = params.get('branch');
+      const commitIdParam = params.get('commitId');
+      
+      if (urlParam) {
+        setGithubUrl(urlParam);
+      }
+      if (branchParam) {
+        setBranch(branchParam);
+      }
+      if (commitIdParam) {
+        setCommitId(commitIdParam);
+      }
+
+            // Auto-analyze if githubUrl is provided (for updates)
+            if (urlParam && urlParam.trim()) {
+              // Small delay to ensure state is set, then analyze
+              setTimeout(async () => {
+                setIsAnalyzing(true);
+                setMessage(null);
+                setDependencies(null);
+                setAnalysisStatus('Fetching requirements.txt...');
+
+                try {
+                  const response = await fetch('/api/install-node/analyze', {
+                    method: 'POST',
+                    headers: {
+                      'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                      githubUrl: urlParam.trim(),
+                      commitId: commitIdParam?.trim() || undefined,
+                      branch: branchParam?.trim() || undefined,
+                    }),
+                  });
+
+                  setAnalysisStatus('Analysis in progress...');
+
+                  const data = await response.json();
+
+                  if (!response.ok) {
+                    setMessage({ type: 'error', text: data.error || 'Failed to analyze dependencies' });
+                    setIsAnalyzing(false);
+                    setAnalysisStatus('');
+                    return;
+                  }
+
+                  // Handle case where requirements.txt doesn't exist
+                  if (data.noRequirementsFile) {
+                    setDependencies([]);
+                    setMessage({ type: 'success', text: 'No requirements.txt found. You can install the node without dependencies.' });
+                  } else {
+                    setDependencies(data.dependencies || []);
+                  }
+                  setIsAnalyzing(false);
+                  setAnalysisStatus('');
+                } catch (error) {
+                  console.error('Error analyzing dependencies:', error);
+                  setMessage({ type: 'error', text: 'Failed to analyze dependencies' });
+                  setIsAnalyzing(false);
+                  setAnalysisStatus('');
+                }
+              }, 300);
+            }
+    }
+
+    // Get selected version
+    fetch('/api/spaces')
+      .then(res => res.json())
+      .then(data => {
+        if (data.selectedVersion) {
+          setSelectedVersion(data.selectedVersion);
+        }
+      })
+      .catch(err => console.error('Error fetching selected version:', err));
+  }, []);
+
+  // Cleanup event source on unmount
+  useEffect(() => {
+    return () => {
+      if (restartEventSourceRef.current) {
+        restartEventSourceRef.current.close();
+        restartEventSourceRef.current = null;
+      }
+    };
+  }, []);
+
+  const restartComfyUI = async () => {
+    if (!selectedVersion) {
+      setMessage({ type: 'error', text: 'No space is currently active' });
+      return;
+    }
+
+    setIsRestarting(true);
+    setLogs(prev => [...prev, '[APP] Restarting ComfyUI...']);
+
+    // Close existing event source if any
+    if (restartEventSourceRef.current) {
+      restartEventSourceRef.current.close();
+      restartEventSourceRef.current = null;
+    }
+
+    try {
+      // First, save the selected version (this will also kill the port)
+      const response = await fetch('/api/activate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ version: selectedVersion }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        setIsRestarting(false);
+        setMessage({ type: 'error', text: data.error || 'Failed to restart ComfyUI' });
+        return;
+      }
+
+      // Connect to log stream to see restart progress
+      const eventSource = new EventSource(`/api/activate/stream?version=${encodeURIComponent(selectedVersion)}`);
+      restartEventSourceRef.current = eventSource;
+
+      eventSource.onopen = () => {
+        console.log('Restart log stream connected');
+      };
+
+      eventSource.onmessage = (event) => {
+        try {
+          const logEntry = JSON.parse(event.data);
+          setLogs(prev => [...prev, logEntry.message]);
+          
+          const message = logEntry.message;
+          
+          // Check for restart failures
+          if (message.includes('[ERROR]') || 
+              message.includes('Failed to install dependencies') ||
+              message.includes('ERROR:') ||
+              message.includes('ResolutionImpossible') ||
+              message.includes('Activation failed')) {
+            setIsRestarting(false);
+            setMessage({ type: 'error', text: 'ComfyUI restart failed' });
+            return;
+          }
+          
+          // Check if ComfyUI is ready - look for messages indicating server started
+          if (message.includes('To see the GUI go to:') || 
+              message.includes('Starting server') ||
+              message.includes('Server started') ||
+              message.includes('Running on') ||
+              (message.includes('[COMFY]') && (message.includes('Running on') || message.includes('Server started')))) {
+            setIsRestarting(false);
+            setLogs(prev => [...prev, '[APP] ComfyUI restarted successfully']);
+            
+            // Close event source
+            if (restartEventSourceRef.current) {
+              restartEventSourceRef.current.close();
+              restartEventSourceRef.current = null;
+            }
+            
+            // Redirect to active page after a short delay
+            setTimeout(() => {
+              router.push('/active');
+            }, 2000);
+          }
+        } catch (error) {
+          console.error('Error parsing log data:', error);
+        }
+      };
+
+      eventSource.onerror = (error) => {
+        console.error('EventSource error:', error);
+        if (restartEventSourceRef.current) {
+          restartEventSourceRef.current.close();
+          restartEventSourceRef.current = null;
+          setIsRestarting(false);
+        }
+      };
+    } catch (error) {
+      console.error('Error restarting ComfyUI:', error);
+      setMessage({ type: 'error', text: 'Failed to restart ComfyUI' });
+      setIsRestarting(false);
+    }
   };
 
   return (
@@ -288,7 +494,13 @@ export default function InstallNodePage() {
                     input: { backgroundColor: '#1a1b1e', color: '#ffffff', borderColor: '#373a40' },
                   }}
                 />
-                <Group justify="flex-end">
+                <Group justify="space-between" align="center">
+                  {analysisStatus && (
+                    <Text size="sm" c="#00d9ff" style={{ fontStyle: 'italic' }}>
+                      {analysisStatus}
+                    </Text>
+                  )}
+                  {!analysisStatus && <div />}
                   <Button
                     type="submit"
                     disabled={isAnalyzing || isInstalling || !githubUrl.trim()}
@@ -305,10 +517,12 @@ export default function InstallNodePage() {
             </form>
           </Paper>
 
-          {dependencies && dependencies.length > 0 && (
+          {dependencies !== null && (
             <Paper p="md" style={{ backgroundColor: '#25262b', border: '1px solid #373a40' }}>
               <Stack gap="md">
-                <Title order={4} c="#ffffff">Dependency Safety Check</Title>
+                {dependencies.length > 0 ? (
+                  <>
+                    <Title order={4} c="#ffffff">Dependency Safety Check</Title>
                 
                 {/* Info Section */}
                 <Paper p="md" style={{ backgroundColor: '#1a1b1e', border: '1px solid #373a40', borderRadius: '8px' }}>
@@ -534,8 +748,10 @@ export default function InstallNodePage() {
                                   </Text>
                                 ))
                               )}
-                              {isStreaming && (
-                                <Text size="xs" c="#00d9ff">Streaming...</Text>
+                              {(isStreaming || isRestarting) && (
+                                <Text size="xs" c="#00d9ff">
+                                  {isRestarting ? 'Restarting ComfyUI...' : 'Streaming...'}
+                                </Text>
                               )}
                             </Stack>
                           </Paper>
@@ -546,19 +762,49 @@ export default function InstallNodePage() {
                   </>
                 )}
 
-                <Group justify="flex-end">
-                  <Button
-                    onClick={handleInstall}
-                    disabled={isInstalling}
-                    loading={isInstalling}
-                    style={{
-                      backgroundColor: !isInstalling ? '#0070f3' : undefined,
-                      color: isInstalling ? '#000000' : '#ffffff',
-                    }}
-                  >
-                    Install & Restart
-                  </Button>
-                </Group>
+                    <Group justify="flex-end">
+                      <Button
+                        onClick={handleInstall}
+                        disabled={isInstalling || isRestarting}
+                        loading={isInstalling || isRestarting}
+                        style={{
+                          backgroundColor: !isInstalling && !isRestarting ? '#0070f3' : undefined,
+                          color: (isInstalling || isRestarting) ? '#000000' : '#ffffff',
+                        }}
+                      >
+                        {isRestarting ? 'Restarting ComfyUI...' : 'Install & Restart'}
+                      </Button>
+                    </Group>
+                  </>
+                ) : (
+                  <>
+                    <Title order={4} c="#ffffff">No Requirements File</Title>
+                    <Paper p="md" style={{ backgroundColor: '#1a1b1e', border: '1px solid #373a40', borderRadius: '8px' }}>
+                      <Group gap="sm" align="flex-start">
+                        <RiInformationLine size={24} style={{ color: '#00d9ff', marginTop: '2px', flexShrink: 0 }} />
+                        <Stack gap="sm" style={{ flex: 1 }}>
+                          <Text size="sm" c="#ffffff" fw={600}>No requirements.txt found</Text>
+                          <Text size="sm" c="#cccccc" style={{ lineHeight: 1.5 }}>
+                            This repository doesn't have a requirements.txt file. You can install the node without installing any dependencies.
+                          </Text>
+                        </Stack>
+                      </Group>
+                    </Paper>
+                    <Group justify="flex-end">
+                      <Button
+                        onClick={handleInstall}
+                        disabled={isInstalling || isRestarting}
+                        loading={isInstalling || isRestarting}
+                        style={{
+                          backgroundColor: !isInstalling && !isRestarting ? '#0070f3' : undefined,
+                          color: (isInstalling || isRestarting) ? '#000000' : '#ffffff',
+                        }}
+                      >
+                        {isRestarting ? 'Restarting ComfyUI...' : 'Install & Restart'}
+                      </Button>
+                    </Group>
+                  </>
+                )}
               </Stack>
             </Paper>
           )}

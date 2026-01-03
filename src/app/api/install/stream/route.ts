@@ -120,9 +120,7 @@ export async function GET(request: NextRequest) {
 
         // Update existing repository
         // First, fetch latest changes
-          // Update existing repository
-          // First, fetch latest changes
-          sendLog(controller, encoder, `[APP] Fetching latest changes...`);
+        sendLog(controller, encoder, `[APP] Fetching latest changes...`);
           const fetchProcess = spawn('git', ['fetch', 'origin'], {
             cwd: nodePath,
             env: { 
@@ -391,8 +389,6 @@ export async function GET(request: NextRequest) {
           sendLog(controller, encoder, `[APP] Update completed successfully`);
           controller.close();
           return;
-        }
-
       } catch (error: any) {
         sendLog(controller, encoder, `[ERROR] Update failed: ${error.message}`);
         controller.close();

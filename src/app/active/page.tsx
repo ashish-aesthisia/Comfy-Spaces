@@ -1,9 +1,9 @@
 'use client';
 
 import { useEffect, useState, useRef } from 'react';
-import { Container, Title, Text, Stack, Button, Grid, Card, Group, Menu, ActionIcon, Modal, ScrollArea, Paper, Badge } from '@mantine/core';
+import { Container, Title, Text, Stack, Button, Grid, Card, Group, Menu, ActionIcon, Modal, ScrollArea, Paper, Badge, Divider } from '@mantine/core';
 import { useRouter } from 'next/navigation';
-import { RiHomeLine, RiCheckboxCircleFill, RiCloseCircleFill, RiDownloadLine, RiPencilLine, RiMoreFill, RiDeleteBinLine, RiStopCircleLine, RiHistoryLine, RiFileListLine, RiArrowDownSLine, RiArrowUpSLine, RiExternalLinkLine, RiAddLine, RiRefreshLine, RiCircleFill } from 'react-icons/ri';
+import { RiHomeLine, RiCheckboxCircleFill, RiCloseCircleFill, RiDownloadLine, RiPencilLine, RiMoreFill, RiDeleteBinLine, RiHistoryLine, RiFileListLine, RiArrowDownSLine, RiArrowUpSLine, RiExternalLinkLine, RiAddLine, RiRefreshLine, RiCircleFill } from 'react-icons/ri';
 import LogSidebar from './components/LogSidebar';
 import NodeTreeModal from './components/NodeTreeModal';
 
@@ -47,11 +47,19 @@ export default function ActivePage() {
   const [changesModalOpened, setChangesModalOpened] = useState(false);
   const [changesDiff, setChangesDiff] = useState<any>(null);
   const [loadingChanges, setLoadingChanges] = useState(false);
+  const [requirementsHistory, setRequirementsHistory] = useState<any[]>([]);
+  const [selectedHistoryEntry, setSelectedHistoryEntry] = useState<string | null>(null);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+  const [restoring, setRestoring] = useState(false);
   const [logsSidebarOpen, setLogsSidebarOpen] = useState(false);
   const [comfyUIOnline, setComfyUIOnline] = useState(false);
   const [comfyUIRestarting, setComfyUIRestarting] = useState(false);
   const [restartLogs, setRestartLogs] = useState<Array<{ message: string; timestamp: string }>>([]);
   const [showRestartLogs, setShowRestartLogs] = useState(false);
+  const [deleteModalOpened, setDeleteModalOpened] = useState(false);
+  const [nodeToDelete, setNodeToDelete] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [creatingRevision, setCreatingRevision] = useState(false);
   const restartEventSourceRef = useRef<EventSource | null>(null);
   const restartLogsEndRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
@@ -63,22 +71,27 @@ export default function ActivePage() {
     });
     if (node.branch) params.append('branch', node.branch);
     if (node.commitId) params.append('commitId', node.commitId);
-    router.push(`/install?${params.toString()}`);
+    router.push(`/install-node?${params.toString()}`);
   };
 
-  const handleDelete = async (nodeName: string) => {
-    if (!confirm(`Are you sure you want to delete "${nodeName}"? This action cannot be undone.`)) {
-      return;
-    }
+  const handleDeleteClick = (nodeName: string) => {
+    setNodeToDelete(nodeName);
+    setDeleteModalOpened(true);
+  };
 
+  const handleDeleteConfirm = async () => {
+    if (!nodeToDelete) return;
+
+    setDeleting(true);
     try {
-      const response = await fetch(`/api/nodes/${encodeURIComponent(nodeName)}`, {
+      const response = await fetch(`/api/nodes/${encodeURIComponent(nodeToDelete)}`, {
         method: 'DELETE',
       });
 
       if (!response.ok) {
         const data = await response.json();
         alert(data.error || 'Failed to delete node');
+        setDeleting(false);
         return;
       }
 
@@ -88,35 +101,17 @@ export default function ActivePage() {
       if (!extensionsData.error) {
         setNodes(extensionsData.nodes || []);
       }
+
+      setDeleteModalOpened(false);
+      setNodeToDelete(null);
+      setDeleting(false);
     } catch (error) {
       console.error('Error deleting node:', error);
       alert('Failed to delete node');
+      setDeleting(false);
     }
   };
 
-  const handleDisable = async (nodeName: string, currentlyDisabled: boolean) => {
-    try {
-      const response = await fetch(`/api/nodes/${encodeURIComponent(nodeName)}/disable`, {
-        method: currentlyDisabled ? 'DELETE' : 'POST',
-      });
-
-      if (!response.ok) {
-        const data = await response.json();
-        alert(data.error || `Failed to ${currentlyDisabled ? 'enable' : 'disable'} node`);
-        return;
-      }
-
-      // Refresh the nodes list
-      const extensionsResponse = await fetch('/api/extensions');
-      const extensionsData = await extensionsResponse.json();
-      if (!extensionsData.error) {
-        setNodes(extensionsData.nodes || []);
-      }
-    } catch (error) {
-      console.error(`Error ${currentlyDisabled ? 'enabling' : 'disabling'} node:`, error);
-      alert(`Failed to ${currentlyDisabled ? 'enable' : 'disable'} node`);
-    }
-  };
 
   const handleRestartComfyUI = async () => {
     if (!selectedVersion) {
@@ -256,9 +251,40 @@ export default function ActivePage() {
 
   const handleShowChanges = async () => {
     setLoadingChanges(true);
+    setLoadingHistory(true);
     setChangesModalOpened(true);
+    setSelectedHistoryEntry(null);
+    setChangesDiff(null);
+    
     try {
-      const diffResponse = await fetch('/api/requirements/diff');
+      // Fetch history list
+      if (selectedVersion) {
+        const historyResponse = await fetch(`/api/spaces/${encodeURIComponent(selectedVersion)}/requirements/history`);
+        const historyData = await historyResponse.json();
+        
+        if (historyResponse.ok && historyData.history) {
+          setRequirementsHistory(historyData.history);
+          // Select the most recent entry by default
+          if (historyData.history.length > 0) {
+            setSelectedHistoryEntry(historyData.history[0].id);
+            await loadHistoryDiff(historyData.history[0].id);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching history:', error);
+    } finally {
+      setLoadingHistory(false);
+      setLoadingChanges(false);
+    }
+  };
+
+  const loadHistoryDiff = async (entryId: string) => {
+    if (!selectedVersion || !entryId) return;
+    
+    setLoadingChanges(true);
+    try {
+      const diffResponse = await fetch(`/api/spaces/${encodeURIComponent(selectedVersion)}/requirements/history/${encodeURIComponent(entryId)}/diff`);
       const diffData = await diffResponse.json();
       
       if (!diffResponse.ok) {
@@ -271,6 +297,46 @@ export default function ActivePage() {
       setChangesDiff({ error: 'Failed to load changes' });
     } finally {
       setLoadingChanges(false);
+    }
+  };
+
+  const handleHistoryEntrySelect = async (entryId: string) => {
+    setSelectedHistoryEntry(entryId);
+    await loadHistoryDiff(entryId);
+  };
+
+  const handleRestore = async (entryId: string) => {
+    if (!selectedVersion || !entryId) return;
+    
+    if (!confirm('Are you sure you want to restore this version of requirements? This will overwrite the current requirements.txt.')) {
+      return;
+    }
+
+    setRestoring(true);
+    try {
+      const response = await fetch(`/api/spaces/${encodeURIComponent(selectedVersion)}/requirements/history/${encodeURIComponent(entryId)}/restore`, {
+        method: 'POST',
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        alert(data.error || 'Failed to restore requirements');
+        setRestoring(false);
+        return;
+      }
+
+      alert('Requirements restored successfully!');
+      setChangesModalOpened(false);
+      setChangesDiff(null);
+      setSelectedHistoryEntry(null);
+      
+      // Refresh the page to show updated requirements
+      window.location.reload();
+    } catch (error) {
+      console.error('Error restoring requirements:', error);
+      alert('Failed to restore requirements');
+      setRestoring(false);
     }
   };
 
@@ -791,15 +857,9 @@ export default function ActivePage() {
                             </Menu.Target>
                             <Menu.Dropdown>
                               <Menu.Item
-                                leftSection={<RiStopCircleLine size={16} />}
-                                onClick={() => handleDisable(node.name, node.disabled || false)}
-                              >
-                                {node.disabled ? 'Enable' : 'Disable'}
-                              </Menu.Item>
-                              <Menu.Item
                                 leftSection={<RiDeleteBinLine size={16} />}
                                 color="red"
-                                onClick={() => handleDelete(node.name)}
+                                onClick={() => handleDeleteClick(node.name)}
                               >
                                 Delete
                               </Menu.Item>
@@ -900,8 +960,15 @@ export default function ActivePage() {
         onClose={() => {
           setChangesModalOpened(false);
           setChangesDiff(null);
+          setSelectedHistoryEntry(null);
+          setRequirementsHistory([]);
         }}
-        title="Requirements Changes"
+        title={
+          <Group gap="xs" align="center">
+            <RiHistoryLine size={20} />
+            <Text>Requirements History</Text>
+          </Group>
+        }
         size="xl"
         styles={{
           title: { color: '#ffffff' },
@@ -910,84 +977,181 @@ export default function ActivePage() {
           body: { backgroundColor: '#1a1b1e' },
         }}
       >
-        {loadingChanges ? (
-          <Text c="dimmed" ta="center" py="xl">Loading changes...</Text>
-        ) : changesDiff?.error ? (
-          <Text c="red" ta="center" py="xl">{changesDiff.error}</Text>
-        ) : !changesDiff?.hasBackup ? (
-          <Text c="dimmed" ta="center" py="xl">No backup file found. Changes will be shown after the first merge.</Text>
+        {loadingHistory ? (
+          <Text c="dimmed" ta="center" py="xl">Loading history...</Text>
+        ) : requirementsHistory.length === 0 ? (
+          <Text c="dimmed" ta="center" py="xl">No history available yet. History will be created when you install nodes or activate spaces.</Text>
         ) : (
-          <Stack gap="md">
-            <Group justify="space-between" align="center">
-              <Group gap="md">
-                <Text size="sm" c="#888888">
-                  Backup: {changesDiff.backup.lineCount} lines
-                </Text>
-                <Text size="sm" c="#888888">
-                  Current: {changesDiff.current.lineCount} lines
-                </Text>
-              </Group>
-            </Group>
-            
-            <Paper 
-              p="sm" 
-              style={{ 
-                backgroundColor: '#0a0a0a', 
-                border: '1px solid #373a40',
-                maxHeight: '600px',
-                overflow: 'auto',
-                fontFamily: 'monospace',
-                fontSize: '12px',
-                lineHeight: '1.6',
-              }}
-            >
-              <ScrollArea h={600}>
-                {changesDiff.diff.map((item: any, idx: number) => {
-                  let bgColor = 'transparent';
-                  let borderLeft = 'none';
-                  let textColor = '#ffffff';
-                  let prefix = '  ';
-                  
-                  if (item.type === 'added') {
-                    bgColor = '#1b2d1b';
-                    borderLeft = '3px solid #51cf66';
-                    textColor = '#51cf66';
-                    prefix = '+ ';
-                  } else if (item.type === 'removed') {
-                    bgColor = '#2d1b1b';
-                    borderLeft = '3px solid #ff6b6b';
-                    textColor = '#ff6b6b';
-                    prefix = '- ';
-                  } else {
-                    textColor = '#888888';
-                    prefix = '  ';
-                  }
-                  
-                  const displayLine = item.currentLine || item.backupLine || '';
-                  
-                  return (
-                    <div
-                      key={idx}
-                      style={{
-                        padding: '2px 8px',
-                        backgroundColor: bgColor,
-                        borderLeft,
-                        marginBottom: '1px',
-                        whiteSpace: 'pre',
-                        color: textColor,
+          <Grid gutter="md" style={{ height: '600px' }}>
+            {/* Left Column: Diff View */}
+            <Grid.Col span={8}>
+              <Stack gap="md" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+                {loadingChanges ? (
+                  <Text c="dimmed" ta="center" py="xl">Loading changes...</Text>
+                ) : changesDiff?.error ? (
+                  <Text c="red" ta="center" py="xl">{changesDiff.error}</Text>
+                ) : !selectedHistoryEntry ? (
+                  <Text c="dimmed" ta="center" py="xl">Select a history entry to view changes</Text>
+                ) : (
+                  <>
+                    <Group justify="space-between" align="center" style={{ flexShrink: 0 }}>
+                      <Group gap="md">
+                        <Text size="sm" c="#888888">
+                          History: {changesDiff?.history?.lineCount || 0} lines
+                        </Text>
+                        <Text size="sm" c="#888888">
+                          Current: {changesDiff?.current?.lineCount || 0} lines
+                        </Text>
+                      </Group>
+                    </Group>
+                    
+                    <Paper 
+                      p="sm" 
+                      style={{ 
+                        backgroundColor: '#0a0a0a', 
+                        border: '1px solid #373a40',
+                        flex: 1,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        minHeight: 0,
+                        fontFamily: 'monospace',
+                        fontSize: '12px',
+                        lineHeight: '1.6',
                       }}
                     >
-                      <span style={{ color: '#666666', marginRight: '8px' }}>
-                        {String(item.lineNumber).padStart(4, ' ')}
-                      </span>
-                      <span>{prefix}</span>
-                      <span>{displayLine || ' '}</span>
-                    </div>
-                  );
-                })}
-              </ScrollArea>
-            </Paper>
-          </Stack>
+                      <ScrollArea style={{ flex: 1, height: '100%' }}>
+                        {changesDiff?.diff?.map((item: any, idx: number) => {
+                          let bgColor = 'transparent';
+                          let borderLeft = 'none';
+                          let textColor = '#ffffff';
+                          let prefix = '  ';
+                          
+                          if (item.type === 'added') {
+                            bgColor = '#1b2d1b';
+                            borderLeft = '3px solid #51cf66';
+                            textColor = '#51cf66';
+                            prefix = '+ ';
+                          } else if (item.type === 'removed') {
+                            bgColor = '#2d1b1b';
+                            borderLeft = '3px solid #ff6b6b';
+                            textColor = '#ff6b6b';
+                            prefix = '- ';
+                          } else if (item.type === 'updated') {
+                            bgColor = '#2d2b1b';
+                            borderLeft = '3px solid #ffd43b';
+                            textColor = '#ffd43b';
+                            prefix = '~ ';
+                          } else if (item.type === 'downgraded') {
+                            bgColor = '#2d1b2b';
+                            borderLeft = '3px solid #ff8787';
+                            textColor = '#ff8787';
+                            prefix = '↓ ';
+                          } else {
+                            textColor = '#888888';
+                            prefix = '  ';
+                          }
+                          
+                          const displayLine = item.currentLine || item.historyLine || '';
+                          
+                          return (
+                            <div
+                              key={idx}
+                              style={{
+                                padding: '2px 8px',
+                                backgroundColor: bgColor,
+                                borderLeft,
+                                marginBottom: '1px',
+                                whiteSpace: 'pre',
+                                color: textColor,
+                              }}
+                            >
+                              <span style={{ color: '#666666', marginRight: '8px' }}>
+                                {String(item.lineNumber).padStart(4, ' ')}
+                              </span>
+                              <span>{prefix}</span>
+                              <span>{displayLine || ' '}</span>
+                              {item.type === 'updated' || item.type === 'downgraded' ? (
+                                <div style={{ paddingLeft: '20px', color: '#ff6b6b', fontSize: '11px' }}>
+                                  {item.historyLine}
+                                </div>
+                              ) : null}
+                            </div>
+                          );
+                        })}
+                      </ScrollArea>
+                    </Paper>
+                  </>
+                )}
+              </Stack>
+            </Grid.Col>
+
+            {/* Right Column: History List */}
+            <Grid.Col span={4}>
+              <Stack gap="xs" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+                <Text size="sm" fw={600} c="#ffffff" style={{ flexShrink: 0 }}>History Entries</Text>
+                <Divider style={{ flexShrink: 0 }} />
+                <ScrollArea style={{ flex: 1, minHeight: 0 }}>
+                  <Stack gap="xs">
+                    {requirementsHistory.map((entry) => {
+                      const title = entry.type === 'node_install' && entry.nodeName
+                        ? entry.nodeName
+                        : entry.type === 'activation'
+                        ? 'Activation'
+                        : 'Node Install';
+                      
+                      return (
+                        <Paper
+                          key={entry.id}
+                          p="sm"
+                          style={{
+                            backgroundColor: selectedHistoryEntry === entry.id ? '#2d2f35' : '#25262b',
+                            border: selectedHistoryEntry === entry.id ? '1px solid #0070f3' : '1px solid #373a40',
+                            cursor: 'pointer',
+                            transition: 'all 0.2s',
+                          }}
+                          onClick={() => handleHistoryEntrySelect(entry.id)}
+                          onMouseEnter={(e) => {
+                            if (selectedHistoryEntry !== entry.id) {
+                              e.currentTarget.style.backgroundColor = '#2d2f35';
+                            }
+                          }}
+                          onMouseLeave={(e) => {
+                            if (selectedHistoryEntry !== entry.id) {
+                              e.currentTarget.style.backgroundColor = '#25262b';
+                            }
+                          }}
+                        >
+                          <Stack gap="xs">
+                            <Group justify="space-between" align="flex-start">
+                              <Text size="sm" fw={500} c="#ffffff" style={{ flex: 1 }}>
+                                {title}
+                              </Text>
+                              <Button
+                                size="xs"
+                                variant="subtle"
+                                color="blue"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleRestore(entry.id);
+                                }}
+                                loading={restoring && selectedHistoryEntry === entry.id}
+                                disabled={restoring}
+                              >
+                                Restore
+                              </Button>
+                            </Group>
+                            <Text size="xs" c="#666666">
+                              {new Date(entry.timestamp).toLocaleString()}
+                            </Text>
+                          </Stack>
+                        </Paper>
+                      );
+                    })}
+                  </Stack>
+                </ScrollArea>
+              </Stack>
+            </Grid.Col>
+          </Grid>
         )}
       </Modal>
 
@@ -1057,6 +1221,53 @@ export default function ActivePage() {
             <Text size="xs" c="#888888">
               {restartLogs.length} log entries
             </Text>
+          </Group>
+        </Stack>
+      </Modal>
+
+      <Modal
+        opened={deleteModalOpened}
+        onClose={() => {
+          if (!deleting) {
+            setDeleteModalOpened(false);
+            setNodeToDelete(null);
+          }
+        }}
+        title="Delete Node"
+        styles={{
+          title: { color: '#ffffff' },
+          content: { backgroundColor: '#1a1b1e' },
+          header: { backgroundColor: '#25262b', borderBottom: '1px solid #373a40' },
+          body: { backgroundColor: '#1a1b1e' },
+        }}
+      >
+        <Stack gap="md">
+          <Text c="#ffffff">
+            Are you sure you want to delete <strong>{nodeToDelete}</strong>? This action cannot be undone.
+          </Text>
+          <Text size="sm" c="#888888">
+            This will remove the node from the custom_nodes directory and update space.json.
+          </Text>
+          <Group justify="flex-end" gap="sm">
+            <Button
+              variant="subtle"
+              onClick={() => {
+                setDeleteModalOpened(false);
+                setNodeToDelete(null);
+              }}
+              disabled={deleting}
+              style={{ color: '#ffffff' }}
+            >
+              Cancel
+            </Button>
+            <Button
+              color="red"
+              onClick={handleDeleteConfirm}
+              loading={deleting}
+              leftSection={<RiDeleteBinLine size={16} />}
+            >
+              Delete
+            </Button>
           </Group>
         </Stack>
       </Modal>

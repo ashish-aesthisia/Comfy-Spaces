@@ -49,6 +49,12 @@ function parseRequirements(content: string): string[] {
   return dependencies;
 }
 
+// Normalize package name (convert hyphens to underscores for consistent comparison)
+// Python packages can use hyphens or underscores interchangeably
+function normalizePackageName(name: string): string {
+  return name.toLowerCase().replace(/-/g, '_');
+}
+
 function parseDryRunOutput(output: string): SubDependency[] {
   const subdependenciesMap = new Map<string, string | undefined>();
   const lines = output.split('\n');
@@ -64,8 +70,9 @@ function parseDryRunOutput(output: string): SubDependency[] {
       if (matchWithVersion && matchWithVersion[1] && matchWithVersion[2]) {
         let depName = matchWithVersion[1].split('[')[0].trim();
         const version = matchWithVersion[2].trim();
-        if (depName && !subdependenciesMap.has(depName.toLowerCase())) {
-          subdependenciesMap.set(depName.toLowerCase(), version);
+        const normalizedName = normalizePackageName(depName);
+        if (depName && !subdependenciesMap.has(normalizedName)) {
+          subdependenciesMap.set(normalizedName, version);
         }
       } else {
         // Match without version: "Collecting package"
@@ -73,31 +80,16 @@ function parseDryRunOutput(output: string): SubDependency[] {
         if (match && match[1]) {
           let depName = match[1].split('[')[0];
           depName = depName.split('==')[0].split('>=')[0].split('<=')[0].split('~=')[0].split('!=')[0].trim();
-          if (depName && !subdependenciesMap.has(depName.toLowerCase())) {
+          const normalizedName = normalizePackageName(depName);
+          if (depName && !subdependenciesMap.has(normalizedName)) {
             // No version found yet, add with undefined (we'll get it from "Would install" if available)
-            subdependenciesMap.set(depName.toLowerCase(), undefined);
+            subdependenciesMap.set(normalizedName, undefined);
           }
         }
       }
     }
-    // Look for "Using cached package-version" lines - these have version info
-    // Format: "Using cached package-version-...whl.metadata"
-    else if (trimmed.includes('Using cached ') && trimmed.includes('.whl')) {
-      const match = trimmed.match(/Using cached\s+([a-zA-Z0-9_.-]+)-([a-zA-Z0-9_.-]+)-/);
-      if (match && match[1] && match[2]) {
-        const depName = match[1].trim();
-        // The version might be in the second part, but could also have platform info
-        // Try to extract just the version part (usually before cp, py, or platform identifiers)
-        let version = match[2].trim();
-        // Remove platform-specific suffixes like cp311, macosx, etc.
-        version = version.split('-cp')[0].split('-py')[0].split('-macosx')[0].split('-linux')[0].split('-win')[0];
-        if (depName && version && /[\d.]/.test(version)) {
-          if (!subdependenciesMap.has(depName.toLowerCase())) {
-            subdependenciesMap.set(depName.toLowerCase(), version);
-          }
-        }
-      }
-    }
+    // Skip "Using cached" lines - they're redundant and cause incorrect parsing
+    // The package info is already captured from "Collecting" lines
     // Look for "Requirement already satisfied: package==version" lines
     // Format: "Requirement already satisfied: package==version in ... (from parent->subdep) (version)"
     else if (trimmed.startsWith('Requirement already satisfied: ')) {
@@ -106,8 +98,9 @@ function parseDryRunOutput(output: string): SubDependency[] {
       if (matchWithVersion && matchWithVersion[1] && matchWithVersion[2]) {
         const depName = matchWithVersion[1].trim();
         const version = matchWithVersion[2].trim();
-        if (depName && !subdependenciesMap.has(depName.toLowerCase())) {
-          subdependenciesMap.set(depName.toLowerCase(), version);
+        const normalizedName = normalizePackageName(depName);
+        if (depName && !subdependenciesMap.has(normalizedName)) {
+          subdependenciesMap.set(normalizedName, version);
         }
       } else {
         // Try to extract version from parentheses at the end: "(version)"
@@ -117,8 +110,9 @@ function parseDryRunOutput(output: string): SubDependency[] {
           const version = matchWithParens[2].trim();
           // Check if the version looks valid (contains digits or dots)
           if (/[\d.]/.test(version) && !version.includes('from')) {
-            if (depName && !subdependenciesMap.has(depName.toLowerCase())) {
-              subdependenciesMap.set(depName.toLowerCase(), version);
+            const normalizedName = normalizePackageName(depName);
+            if (depName && !subdependenciesMap.has(normalizedName)) {
+              subdependenciesMap.set(normalizedName, version);
             }
           }
         }
@@ -131,8 +125,9 @@ function parseDryRunOutput(output: string): SubDependency[] {
       const packages = packagesStr.split(/\s+/);
       packages.forEach(pkg => {
         // Package format is usually "package-version" where version can have multiple dashes
-        // Try to extract package name and version
-        // Pattern: package-name-2.9.1 or package-name==2.9.1
+        // Wheel format: package-name-version-cp311-cp311-platform.whl
+        // We need to find where the version starts (first part that starts with digit)
+        // and where it ends (before platform identifiers like cp311, py3, macosx, etc.)
         let depName = pkg;
         let version: string | undefined = undefined;
         
@@ -142,27 +137,54 @@ function parseDryRunOutput(output: string): SubDependency[] {
           depName = parts[0].trim();
           version = parts[1]?.trim();
         } else if (pkg.includes('-')) {
-          // Try to extract version from package-version format
-          // Find the last occurrence of a pattern that looks like a version (starts with digit)
           const parts = pkg.split('-');
-          // Look backwards for version pattern (starts with digit)
-          for (let i = parts.length - 1; i >= 0; i--) {
+          
+          // Find the first part that looks like a version (starts with digit)
+          let versionStartIdx = -1;
+          for (let i = 0; i < parts.length; i++) {
             if (/^\d/.test(parts[i])) {
-              // Found version part
-              depName = parts.slice(0, i).join('-');
-              version = parts.slice(i).join('-');
+              versionStartIdx = i;
               break;
             }
+          }
+          
+          if (versionStartIdx > 0) {
+            // Extract package name (everything before version)
+            depName = parts.slice(0, versionStartIdx).join('-');
+            
+            // Extract version (everything from version start until we hit platform identifiers)
+            // Platform identifiers: cp311, py3, macosx, linux, win, any, etc.
+            let versionEndIdx = versionStartIdx + 1;
+            for (let i = versionStartIdx + 1; i < parts.length; i++) {
+              // Check if this part is a platform identifier
+              if (/^(cp|py|macosx|linux|win|any|none)$/i.test(parts[i]) || 
+                  /^cp\d+$/i.test(parts[i]) || 
+                  /^py\d+$/i.test(parts[i])) {
+                versionEndIdx = i;
+                break;
+              }
+              // Also stop if we hit a file extension
+              if (parts[i].includes('.whl') || parts[i].includes('.tar')) {
+                versionEndIdx = i;
+                break;
+              }
+            }
+            
+            version = parts.slice(versionStartIdx, versionEndIdx).join('-');
+            // Clean up any trailing file extensions
+            version = version.replace(/\.(whl|tar|gz|zip)$/i, '');
           }
         }
         
         if (depName) {
-          if (version && /[\d.]/.test(version)) {
+          const normalizedName = normalizePackageName(depName);
+          // Only accept version if it looks valid (contains digits and dots, not platform identifiers)
+          if (version && /^[\d.]+/.test(version) && !/^(cp|py|macosx|linux|win)/i.test(version)) {
             // "Would install" has the most accurate version info, so always overwrite
-            subdependenciesMap.set(depName.toLowerCase(), version);
-          } else if (!subdependenciesMap.has(depName.toLowerCase())) {
+            subdependenciesMap.set(normalizedName, version);
+          } else if (!subdependenciesMap.has(normalizedName)) {
             // If no version found and package not already in map, add it without version
-            subdependenciesMap.set(depName.toLowerCase(), undefined);
+            subdependenciesMap.set(normalizedName, undefined);
           }
         }
       });
@@ -181,12 +203,6 @@ function parseDryRunOutput(output: string): SubDependency[] {
   });
   
   return subdependencies;
-}
-
-function normalizePackageName(name: string): string {
-  // Python packages can use hyphens or underscores interchangeably
-  // Normalize by converting both to underscores for consistent comparison
-  return name.toLowerCase().replace(/-/g, '_');
 }
 
 function parseExistingDependencies(requirementsContent: string): Map<string, string> {
@@ -302,7 +318,7 @@ function getDependencyStatus(
   }
 }
 
-async function fetchRequirementsFromGit(githubUrl: string, commitId?: string, branch?: string): Promise<string> {
+async function fetchRequirementsFromGit(githubUrl: string, commitId?: string, branch?: string): Promise<string | null> {
   // Extract repo info from URL
   const urlMatch = githubUrl.match(/github\.com\/([^\/]+)\/([^\/\.]+)/);
   if (!urlMatch) {
@@ -312,46 +328,125 @@ async function fetchRequirementsFromGit(githubUrl: string, commitId?: string, br
   const [, owner, repo] = urlMatch;
   const repoName = repo.replace('.git', '');
   
-  // Try GitHub raw API first (simpler and faster)
+  // Method 1: Try GitHub Raw API directly (fastest, no cloning needed)
+  // Format: https://raw.githubusercontent.com/{owner}/{repo}/{ref}/requirements.txt
   let ref = branch || commitId;
-  if (!ref) {
-    // Try common default branch names
-    const defaultBranches = ['main', 'master', 'develop'];
-    for (const defaultBranch of defaultBranches) {
+  
+  if (ref) {
+    // For branches, try both direct branch name and refs/heads/{branch} format
+    let rawUrls: string[] = [];
+    if (branch) {
+      rawUrls = [
+        `https://raw.githubusercontent.com/${owner}/${repoName}/${branch}/requirements.txt`,
+        `https://raw.githubusercontent.com/${owner}/${repoName}/refs/heads/${branch}/requirements.txt`,
+      ];
+    } else {
+      // For commits, use commit SHA directly
+      rawUrls = [`https://raw.githubusercontent.com/${owner}/${repoName}/${commitId}/requirements.txt`];
+    }
+    
+    // Try each URL (usually first one works)
+    for (const rawUrl of rawUrls) {
       try {
-        const rawUrl = `https://raw.githubusercontent.com/${owner}/${repoName}/${defaultBranch}/requirements.txt`;
-        const response = await fetch(rawUrl, { 
-          method: 'HEAD',
-          signal: AbortSignal.timeout(5000),
+        const response = await fetch(rawUrl, {
+          signal: AbortSignal.timeout(8000),
         });
         if (response.ok) {
-          const contentResponse = await fetch(rawUrl, {
-            signal: AbortSignal.timeout(10000),
-          });
-          if (contentResponse.ok) {
-            return await contentResponse.text();
-          }
+          return await response.text();
+        } else if (response.status === 404) {
+          // Try next URL format
+          continue;
         }
+      } catch (error) {
+        // Try next URL format
+        continue;
+      }
+    }
+  } else {
+    // No branch/commit specified, try common default branches in parallel
+    const defaultBranches = ['main', 'master', 'develop'];
+    const rawUrls = defaultBranches.map(b => 
+      `https://raw.githubusercontent.com/${owner}/${repoName}/${b}/requirements.txt`
+    );
+    
+    // Try all branches, return first successful one
+    for (const rawUrl of rawUrls) {
+      try {
+        const response = await fetch(rawUrl, {
+          signal: AbortSignal.timeout(8000),
+        });
+        if (response.ok) {
+          return await response.text();
+        }
+        // If 404, continue to next branch
       } catch (error) {
         // Continue to next branch
         continue;
       }
     }
-  } else {
-    const rawUrl = `https://raw.githubusercontent.com/${owner}/${repoName}/${ref}/requirements.txt`;
-    try {
-      const response = await fetch(rawUrl, {
+  }
+  
+  // Method 2: Try GitHub API (works with commits and branches, no cloning needed)
+  try {
+    let apiUrl = `https://api.github.com/repos/${owner}/${repoName}/contents/requirements.txt`;
+    
+    if (commitId) {
+      // For specific commits, get the commit tree and find requirements.txt
+      const commitResponse = await fetch(`https://api.github.com/repos/${owner}/${repoName}/commits/${commitId}`, {
+        signal: AbortSignal.timeout(10000),
+      });
+      if (commitResponse.ok) {
+        const commitData = await commitResponse.json();
+        const treeSha = commitData.commit.tree.sha;
+        
+        // Get the recursive tree to find requirements.txt
+        const treeResponse = await fetch(`https://api.github.com/repos/${owner}/${repoName}/git/trees/${treeSha}?recursive=1`, {
+          signal: AbortSignal.timeout(10000),
+        });
+        if (treeResponse.ok) {
+          const treeData = await treeResponse.json();
+          const requirementsFile = treeData.tree?.find((file: any) => file.path === 'requirements.txt');
+          if (requirementsFile && requirementsFile.sha) {
+            // Fetch the blob content
+            const blobResponse = await fetch(`https://api.github.com/repos/${owner}/${repoName}/git/blobs/${requirementsFile.sha}`, {
+              signal: AbortSignal.timeout(10000),
+            });
+            if (blobResponse.ok) {
+              const blobData = await blobResponse.json();
+              if (blobData.content) {
+                return Buffer.from(blobData.content, 'base64').toString('utf-8');
+              }
+            }
+          } else {
+            // requirements.txt not found in tree
+            return null;
+          }
+        }
+      }
+    } else {
+      // For branches or default branch, use the contents API
+      if (branch) {
+        apiUrl = `https://api.github.com/repos/${owner}/${repoName}/contents/requirements.txt?ref=${encodeURIComponent(branch)}`;
+      }
+      
+      const response = await fetch(apiUrl, {
         signal: AbortSignal.timeout(10000),
       });
       if (response.ok) {
-        return await response.text();
+        const data = await response.json();
+        if (data.content) {
+          return Buffer.from(data.content, 'base64').toString('utf-8');
+        }
+      } else if (response.status === 404) {
+        // File doesn't exist
+        return null;
       }
-    } catch (error) {
-      // Fall through to git archive method
     }
+  } catch (error) {
+    // Fall through to git archive method
   }
   
-  // Fallback: Use git archive in a temporary directory
+  // Method 3: Last resort - shallow clone (only if all API methods fail)
   const tempDir = join(process.cwd(), 'data', 'temp');
   if (!existsSync(tempDir)) {
     await mkdir(tempDir, { recursive: true });
@@ -360,12 +455,12 @@ async function fetchRequirementsFromGit(githubUrl: string, commitId?: string, br
   const tempRepoPath = join(tempDir, `temp_repo_${Date.now()}`);
   
   try {
-    // Clone shallow to temp location
     let cloneUrl = githubUrl.trim();
     if (!cloneUrl.endsWith('.git')) {
       cloneUrl = `${cloneUrl}.git`;
     }
     
+    // Shallow clone as last resort
     if (branch) {
       await execAsync(`git clone --branch ${branch} --depth 1 ${cloneUrl} ${tempRepoPath}`, {
         timeout: 30000,
@@ -384,7 +479,9 @@ async function fetchRequirementsFromGit(githubUrl: string, commitId?: string, br
     // Read requirements.txt
     const requirementsPath = join(tempRepoPath, 'requirements.txt');
     if (!existsSync(requirementsPath)) {
-      throw new Error('requirements.txt not found in repository');
+      // Cleanup and return null if requirements.txt doesn't exist
+      await execAsync(`rm -rf ${tempRepoPath}`);
+      return null;
     }
     
     const content = await readFile(requirementsPath, 'utf-8');
@@ -400,6 +497,11 @@ async function fetchRequirementsFromGit(githubUrl: string, commitId?: string, br
         await execAsync(`rm -rf ${tempRepoPath}`);
       }
     } catch {}
+    
+    // Check if error is about file not found - return null instead of throwing
+    if (error.message && error.message.includes('not found')) {
+      return null;
+    }
     
     throw new Error(`Failed to fetch requirements.txt: ${error.message}`);
   }
@@ -464,7 +566,29 @@ export async function POST(request: Request) {
     }
 
     // Fetch requirements.txt from git repo
-    const requirementsContent = await fetchRequirementsFromGit(githubUrl, commitId, branch);
+    // If requirements.txt doesn't exist, return success with empty dependencies
+    let requirementsContent: string | null = null;
+    try {
+      requirementsContent = await fetchRequirementsFromGit(githubUrl, commitId, branch);
+    } catch (error: any) {
+      // If fetching fails and it's because file doesn't exist, continue with empty
+      if (error.message && error.message.includes('not found')) {
+        requirementsContent = null;
+      } else {
+        throw error;
+      }
+    }
+    
+    // If requirements.txt doesn't exist, return success with empty dependencies
+    if (requirementsContent === null) {
+      return NextResponse.json({
+        success: true,
+        requirements: null,
+        dependencies: [],
+        noRequirementsFile: true,
+      });
+    }
+    
     const dependencies = parseRequirements(requirementsContent);
 
     // Analyze each dependency with pip install --dry-run

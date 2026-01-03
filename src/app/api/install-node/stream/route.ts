@@ -2,11 +2,51 @@ import { NextRequest } from 'next/server';
 import { join } from 'path';
 import { spawn } from 'child_process';
 import { existsSync, appendFileSync, mkdirSync, writeFileSync, readFileSync } from 'fs';
-import { readFile, writeFile } from 'fs/promises';
+import { readFile, writeFile, mkdir } from 'fs/promises';
 import { promisify } from 'util';
 import { exec } from 'child_process';
 
 const execAsync = promisify(exec);
+
+// Helper function to save requirements history snapshot
+async function saveRequirementsHistory(
+  spacePath: string,
+  type: 'activation' | 'node_install',
+  nodeName?: string
+): Promise<void> {
+  try {
+    const requirementsPath = join(spacePath, 'requirements.txt');
+    if (!existsSync(requirementsPath)) {
+      return;
+    }
+
+    const historyPath = join(spacePath, 'requirements_history');
+    if (!existsSync(historyPath)) {
+      await mkdir(historyPath, { recursive: true });
+    }
+
+    const requirementsContent = await readFile(requirementsPath, 'utf-8');
+    const timestamp = new Date().toISOString();
+    const id = `${Date.now()}_${Math.random().toString(36).substring(7)}`;
+
+    const historyEntry = {
+      id,
+      timestamp,
+      type,
+      nodeName: nodeName || undefined,
+      requirementsContent,
+    };
+
+    const entryPath = join(historyPath, `${id}.json`);
+    await writeFile(entryPath, JSON.stringify(historyEntry, null, 2), 'utf-8');
+
+    const snapshotPath = join(historyPath, `${id}_requirements.txt`);
+    await writeFile(snapshotPath, requirementsContent, 'utf-8');
+  } catch (error) {
+    // Silently fail - history tracking shouldn't break the main flow
+    console.error('Error saving requirements history:', error);
+  }
+}
 
 function sendLog(controller: ReadableStreamDefaultController, encoder: TextEncoder, message: string, logFile?: string) {
   const timestamp = new Date().toISOString();
@@ -84,38 +124,89 @@ export async function GET(request: NextRequest) {
           mkdirSync(nodesPath, { recursive: true });
         }
 
-        // Check if node already exists
-        if (existsSync(nodePath)) {
-          sendLog(controller, encoder, `[ERROR] Node ${nodeName} already exists. Use the update feature instead.`, logFilePath);
-          controller.close();
-          return;
-        }
+        // Check if this is an update (node already exists and is a git repo)
+        const isUpdate = existsSync(nodePath) && existsSync(join(nodePath, '.git'));
 
-        sendLog(controller, encoder, `[APP] Starting installation of node: ${nodeName}`, logFilePath);
-
-        // Step 1: Clone the repository
-        sendLog(controller, encoder, `[APP] Cloning repository...`, logFilePath);
-        try {
-          let cloneUrl = githubUrl.trim();
-          if (!cloneUrl.endsWith('.git')) {
-            cloneUrl = cloneUrl.endsWith('/') ? `${cloneUrl}.git` : `${cloneUrl}.git`;
+        if (isUpdate) {
+          sendLog(controller, encoder, `[APP] Updating existing node: ${nodeName}`, logFilePath);
+          
+          // Step 1: Fetch latest changes
+          sendLog(controller, encoder, `[APP] Fetching latest changes...`, logFilePath);
+          try {
+            await execAsync(`git fetch origin`, { cwd: nodePath });
+            sendLog(controller, encoder, `[APP] Fetched latest changes successfully`, logFilePath);
+          } catch (error: any) {
+            sendLog(controller, encoder, `[ERROR] Failed to fetch updates: ${error.message}`, logFilePath);
+            controller.close();
+            return;
           }
 
-          if (branch) {
-            await execAsync(`git clone --branch ${branch} --depth 1 ${cloneUrl} ${nodePath}`);
+          // Step 2: Checkout specific commit or branch
+          if (commitId) {
+            sendLog(controller, encoder, `[APP] Checking out commit ${commitId}...`, logFilePath);
+            try {
+              await execAsync(`git checkout ${commitId}`, { cwd: nodePath });
+              sendLog(controller, encoder, `[APP] Checked out commit ${commitId} successfully`, logFilePath);
+            } catch (error: any) {
+              sendLog(controller, encoder, `[ERROR] Failed to checkout commit: ${error.message}`, logFilePath);
+              controller.close();
+              return;
+            }
+          } else if (branch) {
+            sendLog(controller, encoder, `[APP] Checking out branch ${branch}...`, logFilePath);
+            try {
+              await execAsync(`git checkout ${branch}`, { cwd: nodePath });
+              sendLog(controller, encoder, `[APP] Checked out branch ${branch} successfully`, logFilePath);
+              
+              // Pull latest changes for the branch
+              sendLog(controller, encoder, `[APP] Pulling latest changes...`, logFilePath);
+              await execAsync(`git pull origin ${branch}`, { cwd: nodePath });
+              sendLog(controller, encoder, `[APP] Pulled latest changes successfully`, logFilePath);
+            } catch (error: any) {
+              sendLog(controller, encoder, `[ERROR] Failed to checkout/pull branch: ${error.message}`, logFilePath);
+              controller.close();
+              return;
+            }
           } else {
-            await execAsync(`git clone --depth 1 ${cloneUrl} ${nodePath}`);
+            // No commit or branch specified, pull current branch
+            sendLog(controller, encoder, `[APP] Pulling latest changes...`, logFilePath);
+            try {
+              await execAsync(`git pull`, { cwd: nodePath });
+              sendLog(controller, encoder, `[APP] Pulled latest changes successfully`, logFilePath);
+            } catch (error: any) {
+              sendLog(controller, encoder, `[ERROR] Failed to pull changes: ${error.message}`, logFilePath);
+              controller.close();
+              return;
+            }
           }
+        } else {
+          // New installation
+          sendLog(controller, encoder, `[APP] Starting installation of node: ${nodeName}`, logFilePath);
 
-          if (commitId && !branch) {
-            await execAsync(`git checkout ${commitId}`, { cwd: nodePath });
+          // Step 1: Clone the repository
+          sendLog(controller, encoder, `[APP] Cloning repository...`, logFilePath);
+          try {
+            let cloneUrl = githubUrl.trim();
+            if (!cloneUrl.endsWith('.git')) {
+              cloneUrl = cloneUrl.endsWith('/') ? `${cloneUrl}.git` : `${cloneUrl}.git`;
+            }
+
+            if (branch) {
+              await execAsync(`git clone --branch ${branch} --depth 1 ${cloneUrl} ${nodePath}`);
+            } else {
+              await execAsync(`git clone --depth 1 ${cloneUrl} ${nodePath}`);
+            }
+
+            if (commitId && !branch) {
+              await execAsync(`git checkout ${commitId}`, { cwd: nodePath });
+            }
+
+            sendLog(controller, encoder, `[APP] Repository cloned successfully`, logFilePath);
+          } catch (error: any) {
+            sendLog(controller, encoder, `[ERROR] Failed to clone repository: ${error.message}`, logFilePath);
+            controller.close();
+            return;
           }
-
-          sendLog(controller, encoder, `[APP] Repository cloned successfully`, logFilePath);
-        } catch (error: any) {
-          sendLog(controller, encoder, `[ERROR] Failed to clone repository: ${error.message}`, logFilePath);
-          controller.close();
-          return;
         }
 
         // Step 2: Update requirements.txt with selected dependencies FIRST
@@ -154,6 +245,8 @@ export async function GET(request: NextRequest) {
           } else {
             sendLog(controller, encoder, `[APP] All selected dependencies already exist in requirements.txt`, logFilePath);
           }
+        } else {
+          sendLog(controller, encoder, `[APP] No dependencies to install`, logFilePath);
         }
 
         // Step 3: Update space.json with node details and dependencies
@@ -198,9 +291,7 @@ export async function GET(request: NextRequest) {
         }
 
         // Step 4: Install dependencies from requirements.txt
-        sendLog(controller, encoder, `[APP] Installing dependencies from requirements.txt...`, logFilePath);
-
-        // Determine Python executable
+        // Determine Python executable (needed for ComfyUI launch later)
         const isWindows = process.platform === 'win32';
         const venvPath = join(spacePath, 'venv');
         let pythonExec = 'python3';
@@ -215,8 +306,10 @@ export async function GET(request: NextRequest) {
             : join(venvPath, 'bin', 'pip3');
         }
 
-        // Install from requirements.txt (which now includes all dependencies)
         if (existsSync(requirementsPath)) {
+          sendLog(controller, encoder, `[APP] Installing dependencies from requirements.txt...`, logFilePath);
+
+          // Install from requirements.txt (which now includes all dependencies)
           const pipProcess = spawn(pipExec, ['install', '-r', requirementsPath], {
             cwd: spacePath,
             env: { ...process.env },
@@ -248,90 +341,19 @@ export async function GET(request: NextRequest) {
             sendLog(controller, encoder, `[WARN] Some dependencies may have failed to install`, logFilePath);
           }
         } else {
-          sendLog(controller, encoder, `[WARN] requirements.txt not found, skipping dependency installation`, logFilePath);
+          sendLog(controller, encoder, `[APP] No requirements.txt found, skipping dependency installation`, logFilePath);
         }
 
-        // Step 5: Activate ComfyUI
-        sendLog(controller, encoder, `[APP] Starting ComfyUI activation...`, logFilePath);
+        // Step 5: Save requirements history snapshot
+        await saveRequirementsHistory(spacePath, 'node_install', nodeName);
 
-        // Step 5: Activate ComfyUI (similar to activate/stream)
-        sendLog(controller, encoder, `[APP] Starting ComfyUI activation...`, logFilePath);
+        // Step 6: Installation complete - signal frontend to restart ComfyUI
+        sendLog(controller, encoder, `[APP] Node installation completed successfully`, logFilePath);
+        sendLog(controller, encoder, `[APP] Restarting ComfyUI...`, logFilePath);
         
-        const comfyUIPath = join(spacePath, 'ComfyUI');
-        const mainPyPath = join(comfyUIPath, 'main.py');
-        const comfyLogFile = join(spacePath, 'comfy-logs.txt');
-
-        if (!existsSync(mainPyPath)) {
-          sendLog(controller, encoder, `[ERROR] ComfyUI main.py not found`, logFilePath);
-          controller.close();
-          return;
-        }
-
-        // Check for custom ComfyUI launch command
-        let comfyUIArgs = ['main.py'];
-        const comfyCmd = process.env.COMFY_CMD || process.env.COMFYUI_LAUNCH_ARGS;
-        if (comfyCmd) {
-          const parts = comfyCmd.trim().split(/\s+/);
-          const args: string[] = [];
-          for (let i = 0; i < parts.length; i++) {
-            const part = parts[i];
-            if (part === '>' || part.startsWith('>')) {
-              i++; // Skip redirection
-              continue;
-            } else if (part === 'python3' || part === 'python') {
-              continue;
-            } else {
-              args.push(part);
-            }
-          }
-          if (args.length > 0) {
-            comfyUIArgs = args;
-          }
-        }
-
-        // Ensure log file directory exists
-        const logFileDir = join(comfyLogFile, '..');
-        if (!existsSync(logFileDir)) {
-          mkdirSync(logFileDir, { recursive: true });
-        }
-
-        // Launch ComfyUI in detached mode
-        const comfyProcess = spawn(pythonExec, comfyUIArgs, {
-          cwd: comfyUIPath,
-          env: { ...process.env },
-          shell: false,
-          detached: false,
-          stdio: ['ignore', 'pipe', 'pipe'],
-        });
-
-        // Write to log file
-        const { createWriteStream } = require('fs');
-        const logStream = createWriteStream(comfyLogFile, { flags: 'a' });
-
-        comfyProcess.stdout?.on('data', (data) => {
-          logStream.write(data);
-        });
-
-        comfyProcess.stderr?.on('data', (data) => {
-          logStream.write(data);
-        });
-
-        comfyProcess.on('error', (error) => {
-          sendLog(controller, encoder, `[ERROR] Failed to launch ComfyUI: ${error.message}`, logFilePath);
-          logStream.end();
-        });
-
-        // Wait a bit to see if ComfyUI starts successfully
-        await new Promise(resolve => setTimeout(resolve, 3000));
-
-        sendLog(controller, encoder, `[APP] ComfyUI server started successfully`, logFilePath);
-        sendLog(controller, encoder, `[APP] Node installation and activation completed successfully`, logFilePath);
-        sendLog(controller, encoder, `[APP] Redirecting to space page...`, logFilePath);
+        // Send signal to frontend to restart ComfyUI
+        sendLog(controller, encoder, `[INSTALL_COMPLETE]`, logFilePath);
         
-        // Send completion signal
-        sendLog(controller, encoder, `[COMPLETE]`, logFilePath);
-        
-        logStream.end();
         controller.close();
       } catch (error: any) {
         sendLog(controller, encoder, `[ERROR] ${error.message}`, logFilePath);

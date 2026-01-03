@@ -2,10 +2,109 @@ import { NextRequest } from 'next/server';
 import { join } from 'path';
 import { spawn, exec } from 'child_process';
 import { existsSync, appendFileSync, mkdirSync, writeFileSync, createWriteStream, readFileSync, statSync } from 'fs';
-import { readdir } from 'fs/promises';
+import { readdir, readFile, writeFile, mkdir } from 'fs/promises';
 import { promisify } from 'util';
 
 const execAsync = promisify(exec);
+
+// Helper function to check if requirements have changed
+async function hasRequirementsChanged(
+  spacePath: string,
+  currentContent: string
+): Promise<boolean> {
+  try {
+    const historyPath = join(spacePath, 'requirements_history');
+    
+    // If no history exists, this is the first entry
+    if (!existsSync(historyPath)) {
+      return true;
+    }
+
+    // Get the most recent history entry
+    const files = await readdir(historyPath);
+    const historyFiles = files
+      .filter(f => f.endsWith('.json'))
+      .sort()
+      .reverse();
+
+    if (historyFiles.length === 0) {
+      return true;
+    }
+
+    // Read the most recent entry
+    const latestFile = historyFiles[0];
+    const latestPath = join(historyPath, latestFile);
+    const latestContent = await readFile(latestPath, 'utf-8');
+    const latestEntry = JSON.parse(latestContent);
+
+    // Compare with current content
+    const latestSnapshotPath = join(historyPath, `${latestEntry.id}_requirements.txt`);
+    if (!existsSync(latestSnapshotPath)) {
+      return true;
+    }
+
+    const latestSnapshot = await readFile(latestSnapshotPath, 'utf-8');
+    
+    // Normalize both contents for comparison (trim, sort lines)
+    const normalize = (content: string) => 
+      content.trim().split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#')).sort().join('\n');
+    
+    return normalize(currentContent) !== normalize(latestSnapshot);
+  } catch (error) {
+    // If we can't check, assume there's a change to be safe
+    console.error('Error checking requirements changes:', error);
+    return true;
+  }
+}
+
+// Helper function to save requirements history snapshot
+async function saveRequirementsHistory(
+  spacePath: string,
+  type: 'activation' | 'node_install',
+  nodeName?: string
+): Promise<void> {
+  try {
+    const requirementsPath = join(spacePath, 'requirements.txt');
+    if (!existsSync(requirementsPath)) {
+      return;
+    }
+
+    const requirementsContent = await readFile(requirementsPath, 'utf-8');
+
+    // For activation, only save if there are changes
+    if (type === 'activation') {
+      const hasChanged = await hasRequirementsChanged(spacePath, requirementsContent);
+      if (!hasChanged) {
+        return; // No changes, don't save
+      }
+    }
+
+    const historyPath = join(spacePath, 'requirements_history');
+    if (!existsSync(historyPath)) {
+      await mkdir(historyPath, { recursive: true });
+    }
+
+    const timestamp = new Date().toISOString();
+    const id = `${Date.now()}_${Math.random().toString(36).substring(7)}`;
+
+    const historyEntry = {
+      id,
+      timestamp,
+      type,
+      nodeName: nodeName || undefined,
+      requirementsContent,
+    };
+
+    const entryPath = join(historyPath, `${id}.json`);
+    await writeFile(entryPath, JSON.stringify(historyEntry, null, 2), 'utf-8');
+
+    const snapshotPath = join(historyPath, `${id}_requirements.txt`);
+    await writeFile(snapshotPath, requirementsContent, 'utf-8');
+  } catch (error) {
+    // Silently fail - history tracking shouldn't break the main flow
+    console.error('Error saving requirements history:', error);
+  }
+}
 
 // Helper function to add timeout to promises
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, errorMessage: string): Promise<T> {
@@ -933,7 +1032,9 @@ export async function GET(request: NextRequest) {
               sendLog(controller, encoder, `[APP] Installing dependencies from space.json...`, logFilePath);
               
               // Install requirements with process tracking
-              const pipProcess = spawn(pipExec, ['install', '-r', requirementsPath], {
+              // Use --upgrade-strategy=only-if-needed to allow pip to resolve conflicts
+              // This will upgrade packages only if needed to satisfy dependencies
+              const pipProcess = spawn(pipExec, ['install', '-r', requirementsPath, '--upgrade-strategy', 'only-if-needed'], {
                 cwd: spacePath,
                 env: { ...process.env },
                 shell: true,
@@ -979,11 +1080,95 @@ export async function GET(request: NextRequest) {
               }
 
               if (pipInstallCode !== 0) {
-                sendLog(controller, encoder, `[ERROR] Failed to install dependencies`, logFilePath);
-                controller.close();
-                return;
+                // If installation failed, try with conflict resolution
+                // Remove strict version pins for known problematic packages and let pip resolve
+                sendLog(controller, encoder, `[WARN] Initial installation failed, attempting conflict resolution...`, logFilePath);
+                
+                // Read the requirements file
+                let requirementsContent = readFileSync(requirementsPath, 'utf-8');
+                const lines = requirementsContent.split('\n');
+                
+                // Known packages that often have conflicts - remove strict pins to let pip resolve
+                // For numpy specifically, we need to allow downgrades if needed
+                const conflictPronePackages = ['numpy', 'scipy', 'pandas', 'matplotlib', 'pillow'];
+                const adjustedLines = lines.map(line => {
+                  const trimmed = line.trim();
+                  if (!trimmed || trimmed.startsWith('#')) {
+                    return line;
+                  }
+                  
+                  for (const pkg of conflictPronePackages) {
+                    // Match package==version and remove the strict pin to let pip resolve
+                    const strictMatch = trimmed.match(new RegExp(`^(${pkg.replace('-', '[-_]')})\\s*==\\s*([^\\s#]+)`, 'i'));
+                    if (strictMatch) {
+                      const pkgName = strictMatch[1];
+                      // Remove version pin entirely - let pip find compatible version
+                      sendLog(controller, encoder, `[APP] Removing strict version pin for ${pkgName} to allow pip to resolve conflicts`, logFilePath);
+                      return pkgName; // Just the package name, no version constraint
+                    }
+                  }
+                  return line;
+                });
+                
+                const adjustedContent = adjustedLines.join('\n');
+                writeFileSync(requirementsPath, adjustedContent, 'utf-8');
+                
+                // Try installation again with relaxed constraints
+                const retryPipProcess = spawn(pipExec, ['install', '-r', requirementsPath, '--upgrade-strategy', 'only-if-needed'], {
+                  cwd: spacePath,
+                  env: { ...process.env },
+                  shell: true,
+                });
+
+                const retryPipProcessKill = () => {
+                  if (!retryPipProcess.killed) {
+                    retryPipProcess.kill('SIGTERM');
+                  }
+                };
+                runningProcesses.push({ process: retryPipProcess, kill: retryPipProcessKill });
+
+                retryPipProcess.stdout?.on('data', (data) => {
+                  const output = data.toString();
+                  sendLog(controller, encoder, output.trim(), logFilePath);
+                });
+
+                retryPipProcess.stderr?.on('data', (data) => {
+                  const output = data.toString();
+                  sendLog(controller, encoder, output.trim(), logFilePath);
+                });
+
+                const retryPipCode = await new Promise<number>((resolve) => {
+                  retryPipProcess.on('close', (code) => {
+                    const index = runningProcesses.findIndex(p => p.process === retryPipProcess);
+                    if (index !== -1) {
+                      runningProcesses.splice(index, 1);
+                    }
+                    resolve(code || 0);
+                  });
+                  retryPipProcess.on('error', () => {
+                    const index = runningProcesses.findIndex(p => p.process === retryPipProcess);
+                    if (index !== -1) {
+                      runningProcesses.splice(index, 1);
+                    }
+                    resolve(1);
+                  });
+                });
+
+                if (isCancelled) {
+                  controller.close();
+                  return;
+                }
+
+                if (retryPipCode !== 0) {
+                  sendLog(controller, encoder, `[ERROR] Failed to install dependencies even after conflict resolution`, logFilePath);
+                  controller.close();
+                  return;
+                }
+                
+                sendLog(controller, encoder, `[APP] Dependencies installed successfully after conflict resolution`, logFilePath);
+              } else {
+                sendLog(controller, encoder, `[APP] Dependencies installed successfully`, logFilePath);
               }
-              sendLog(controller, encoder, `[APP] Dependencies installed successfully`, logFilePath);
               
               // Clean up temporary requirements file
               try {
@@ -1012,6 +1197,9 @@ export async function GET(request: NextRequest) {
 
         // Create requirements.bkp if it doesn't exist
         await createRequirementsBkpIfMissing(pipExec, spacePath, controller, encoder, logFilePath);
+
+        // Save requirements history snapshot after activation
+        await saveRequirementsHistory(spacePath, 'activation');
 
         if (isCancelled) {
           controller.close();
