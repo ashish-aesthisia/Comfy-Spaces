@@ -372,6 +372,225 @@ async function updateCustomNodesGitInfo(
   }
 }
 
+async function cloneComfyUI(
+  spacePath: string,
+  githubUrl: string,
+  releaseTag: string | null,
+  branch: string | null,
+  commitId: string | null,
+  controller: ReadableStreamDefaultController,
+  encoder: TextEncoder,
+  logFile: string
+): Promise<boolean> {
+  try {
+    const comfyUIPath = join(spacePath, 'ComfyUI');
+    
+    // Check if ComfyUI already exists
+    if (existsSync(comfyUIPath)) {
+      sendLog(controller, encoder, `[APP] ComfyUI already exists, skipping clone`, logFile);
+      return true;
+    }
+
+    if (!githubUrl) {
+      sendLog(controller, encoder, `[WARN] No GitHub URL found in space.json, cannot clone ComfyUI`, logFile);
+      return false;
+    }
+
+    sendLog(controller, encoder, `[APP] ComfyUI not found. Cloning from ${githubUrl}...`, logFile);
+
+    // Ensure the URL ends with .git or add it
+    let cloneUrl = githubUrl.trim();
+    if (!cloneUrl.endsWith('.git')) {
+      cloneUrl = cloneUrl.endsWith('/') ? `${cloneUrl}.git` : `${cloneUrl}.git`;
+    }
+
+    try {
+      if (releaseTag) {
+        // Clone specific release tag
+        sendLog(controller, encoder, `[APP] Cloning release tag: ${releaseTag}`, logFile);
+        await withTimeout(
+          execAsync(`git clone --branch ${releaseTag} --depth 1 ${cloneUrl} ${comfyUIPath}`),
+          300000, // 5 minutes timeout
+          'Timeout cloning ComfyUI repository'
+        );
+      } else if (commitId) {
+        // If we have a specific commit, clone without depth limit to ensure the commit is available
+        if (branch) {
+          // Clone specific branch (full history needed for specific commit)
+          sendLog(controller, encoder, `[APP] Cloning branch ${branch} (full history for commit ${commitId.substring(0, 7)})...`, logFile);
+          await withTimeout(
+            execAsync(`git clone --branch ${branch} ${cloneUrl} ${comfyUIPath}`),
+            300000,
+            'Timeout cloning ComfyUI repository'
+          );
+        } else {
+          // Clone default branch (full history needed for specific commit)
+          sendLog(controller, encoder, `[APP] Cloning default branch (full history for commit ${commitId.substring(0, 7)})...`, logFile);
+          await withTimeout(
+            execAsync(`git clone ${cloneUrl} ${comfyUIPath}`),
+            300000,
+            'Timeout cloning ComfyUI repository'
+          );
+        }
+        
+        // Checkout specific commit
+        sendLog(controller, encoder, `[APP] Checking out commit: ${commitId.substring(0, 7)}`, logFile);
+        await withTimeout(
+          execAsync(`git checkout ${commitId}`, { cwd: comfyUIPath }),
+          60000, // 1 minute timeout
+          'Timeout checking out commit'
+        );
+      } else if (branch) {
+        // Clone specific branch (shallow clone is fine if no specific commit)
+        sendLog(controller, encoder, `[APP] Cloning branch: ${branch}`, logFile);
+        await withTimeout(
+          execAsync(`git clone --branch ${branch} --depth 1 ${cloneUrl} ${comfyUIPath}`),
+          300000,
+          'Timeout cloning ComfyUI repository'
+        );
+      } else {
+        // Clone default branch (shallow clone is fine if no specific commit)
+        sendLog(controller, encoder, `[APP] Cloning default branch`, logFile);
+        await withTimeout(
+          execAsync(`git clone --depth 1 ${cloneUrl} ${comfyUIPath}`),
+          300000,
+          'Timeout cloning ComfyUI repository'
+        );
+      }
+
+      sendLog(controller, encoder, `[APP] ComfyUI cloned successfully`, logFile);
+      return true;
+    } catch (error: any) {
+      sendLog(controller, encoder, `[ERROR] Failed to clone ComfyUI: ${error.message}`, logFile);
+      return false;
+    }
+  } catch (error: any) {
+    sendLog(controller, encoder, `[ERROR] Error cloning ComfyUI: ${error.message}`, logFile);
+    return false;
+  }
+}
+
+async function cloneCustomNodes(
+  spacePath: string,
+  nodes: any[],
+  controller: ReadableStreamDefaultController,
+  encoder: TextEncoder,
+  logFile: string
+): Promise<void> {
+  try {
+    const comfyUIPath = join(spacePath, 'ComfyUI');
+    const customNodesPath = join(comfyUIPath, 'custom_nodes');
+
+    // Ensure ComfyUI exists first
+    if (!existsSync(comfyUIPath)) {
+      sendLog(controller, encoder, `[WARN] ComfyUI not found, cannot clone custom nodes`, logFile);
+      return;
+    }
+
+    // Ensure custom_nodes directory exists
+    if (!existsSync(customNodesPath)) {
+      mkdirSync(customNodesPath, { recursive: true });
+    }
+
+    if (!Array.isArray(nodes) || nodes.length === 0) {
+      sendLog(controller, encoder, `[INFO] No custom nodes found in space.json`, logFile);
+      return;
+    }
+
+    sendLog(controller, encoder, `[APP] Checking and cloning ${nodes.length} custom node(s)...`, logFile);
+
+    for (const node of nodes) {
+      // Skip disabled nodes
+      if (node.disabled) {
+        sendLog(controller, encoder, `[INFO] Skipping disabled node: ${node.name}`, logFile);
+        continue;
+      }
+
+      const nodeName = node.name;
+      const nodePath = join(customNodesPath, nodeName);
+      const githubUrl = node.githubUrl;
+      const commitId = node.commitId;
+      const branch = node.branch;
+
+      // Check if node already exists
+      if (existsSync(nodePath)) {
+        sendLog(controller, encoder, `[INFO] Node ${nodeName} already exists, skipping`, logFile);
+        continue;
+      }
+
+      // Skip if no GitHub URL
+      if (!githubUrl) {
+        sendLog(controller, encoder, `[WARN] Node ${nodeName} has no GitHub URL, skipping`, logFile);
+        continue;
+      }
+
+      sendLog(controller, encoder, `[APP] Cloning node: ${nodeName}...`, logFile);
+
+      try {
+        // Ensure the URL ends with .git or add it
+        let cloneUrl = githubUrl.trim();
+        if (!cloneUrl.endsWith('.git')) {
+          cloneUrl = cloneUrl.endsWith('/') ? `${cloneUrl}.git` : `${cloneUrl}.git`;
+        }
+
+        if (commitId) {
+          // If we have a specific commit, clone without depth limit to ensure the commit is available
+          if (branch) {
+            // Clone specific branch (full history needed for specific commit)
+            sendLog(controller, encoder, `[APP] Cloning branch ${branch} (full history for commit ${commitId.substring(0, 7)})...`, logFile);
+            await withTimeout(
+              execAsync(`git clone --branch ${branch} ${cloneUrl} ${nodePath}`),
+              300000, // 5 minutes timeout
+              `Timeout cloning ${nodeName}`
+            );
+          } else {
+            // Clone default branch (full history needed for specific commit)
+            sendLog(controller, encoder, `[APP] Cloning default branch (full history for commit ${commitId.substring(0, 7)})...`, logFile);
+            await withTimeout(
+              execAsync(`git clone ${cloneUrl} ${nodePath}`),
+              300000,
+              `Timeout cloning ${nodeName}`
+            );
+          }
+          
+          // Checkout specific commit
+          sendLog(controller, encoder, `[APP] Checking out commit ${commitId.substring(0, 7)} for ${nodeName}`, logFile);
+          await withTimeout(
+            execAsync(`git checkout ${commitId}`, { cwd: nodePath }),
+            60000, // 1 minute timeout
+            `Timeout checking out commit for ${nodeName}`
+          );
+        } else if (branch) {
+          // Clone specific branch (shallow clone is fine if no specific commit)
+          sendLog(controller, encoder, `[APP] Cloning branch ${branch}...`, logFile);
+          await withTimeout(
+            execAsync(`git clone --branch ${branch} --depth 1 ${cloneUrl} ${nodePath}`),
+            300000, // 5 minutes timeout
+            `Timeout cloning ${nodeName}`
+          );
+        } else {
+          // Clone default branch (shallow clone is fine if no specific commit)
+          sendLog(controller, encoder, `[APP] Cloning default branch...`, logFile);
+          await withTimeout(
+            execAsync(`git clone --depth 1 ${cloneUrl} ${nodePath}`),
+            300000,
+            `Timeout cloning ${nodeName}`
+          );
+        }
+
+        sendLog(controller, encoder, `[APP] Node ${nodeName} cloned successfully`, logFile);
+      } catch (error: any) {
+        sendLog(controller, encoder, `[ERROR] Failed to clone node ${nodeName}: ${error.message}`, logFile);
+        // Continue with other nodes even if one fails
+      }
+    }
+
+    sendLog(controller, encoder, `[APP] Finished cloning custom nodes`, logFile);
+  } catch (error: any) {
+    sendLog(controller, encoder, `[WARN] Error cloning custom nodes: ${error.message}`, logFile);
+  }
+}
+
 async function checkPortInUse(port: number): Promise<boolean> {
   try {
     const isWindows = process.platform === 'win32';
@@ -799,7 +1018,68 @@ export async function GET(request: NextRequest) {
           return;
         }
 
-        // Step 2.5: Update custom_nodes git information in space.json
+        // Step 2.5: Clone ComfyUI if it doesn't exist
+        if (existsSync(spaceJsonPath)) {
+          try {
+            const spaceJsonContent = readFileSync(spaceJsonPath, 'utf-8');
+            const spaceJson = JSON.parse(spaceJsonContent);
+            const metadata = spaceJson.metadata || {};
+            const githubUrl = metadata.githubUrl;
+            const releaseTag = metadata.releaseTag;
+            const branch = metadata.branch;
+            const commitId = metadata.commitId;
+
+            if (githubUrl) {
+              const comfyUICloned = await cloneComfyUI(
+                spacePath,
+                githubUrl,
+                releaseTag,
+                branch,
+                commitId,
+                controller,
+                encoder,
+                logFilePath
+              );
+
+              if (!comfyUICloned) {
+                sendLog(controller, encoder, `[WARN] Failed to clone ComfyUI, but continuing...`, logFilePath);
+              }
+            } else {
+              sendLog(controller, encoder, `[INFO] No GitHub URL found in space.json metadata, skipping ComfyUI clone`, logFilePath);
+            }
+          } catch (error: any) {
+            sendLog(controller, encoder, `[WARN] Error reading space.json for ComfyUI clone: ${error.message}`, logFilePath);
+          }
+        }
+
+        if (isCancelled) {
+          controller.close();
+          return;
+        }
+
+        // Step 2.6: Clone custom nodes if they don't exist
+        if (existsSync(spaceJsonPath)) {
+          try {
+            const spaceJsonContent = readFileSync(spaceJsonPath, 'utf-8');
+            const spaceJson = JSON.parse(spaceJsonContent);
+            const nodes = spaceJson.nodes || [];
+
+            if (nodes.length > 0) {
+              await cloneCustomNodes(spacePath, nodes, controller, encoder, logFilePath);
+            } else {
+              sendLog(controller, encoder, `[INFO] No custom nodes found in space.json`, logFilePath);
+            }
+          } catch (error: any) {
+            sendLog(controller, encoder, `[WARN] Error reading space.json for custom nodes clone: ${error.message}`, logFilePath);
+          }
+        }
+
+        if (isCancelled) {
+          controller.close();
+          return;
+        }
+
+        // Step 2.7: Update custom_nodes git information in space.json
         await updateCustomNodesGitInfo(spacePath, controller, encoder, logFilePath);
 
         if (isCancelled) {

@@ -40,6 +40,7 @@ export default function ActivePage() {
   const [dependencies, setDependencies] = useState<Dependency[]>([]);
   const [dependenciesExpanded, setDependenciesExpanded] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [refreshingNodes, setRefreshingNodes] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
   const [modalOpened, setModalOpened] = useState(false);
@@ -305,7 +306,10 @@ export default function ActivePage() {
     }
   };
 
-  const fetchNodesForSpace = async (spaceId: string) => {
+  const fetchNodesForSpace = async (spaceId: string, showLoading = false) => {
+    if (showLoading) {
+      setRefreshingNodes(true);
+    }
     try {
       const response = await fetch(`/api/extensions?space=${encodeURIComponent(spaceId)}`);
       const data = await response.json();
@@ -320,6 +324,10 @@ export default function ActivePage() {
       console.error('Error fetching nodes:', err);
       setError('Failed to fetch nodes');
       setNodes([]);
+    } finally {
+      if (showLoading) {
+        setRefreshingNodes(false);
+      }
     }
   };
 
@@ -453,6 +461,10 @@ export default function ActivePage() {
         @keyframes blink {
           0%, 100% { opacity: 1; }
           50% { opacity: 0.3; }
+        }
+        @keyframes spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
         }
       `}</style>
       {/* Top Bar */}
@@ -655,6 +667,33 @@ export default function ActivePage() {
                 <Group justify="space-between" align="center">
                   <Title order={2}>Nodes</Title>
                   <Group gap="sm" align="center">
+                    <ActionIcon
+                      variant="subtle"
+                      color="gray"
+                      size="md"
+                      onClick={() => {
+                        if (selectedVersion && !refreshingNodes) {
+                          fetchNodesForSpace(selectedVersion, true);
+                        }
+                      }}
+                      title="Refresh Custom Nodes"
+                      disabled={refreshingNodes}
+                      style={{ 
+                        color: refreshingNodes ? '#555555' : '#888888',
+                        cursor: refreshingNodes ? 'not-allowed' : 'pointer',
+                        opacity: refreshingNodes ? 0.6 : 1,
+                        ...(refreshingNodes && {
+                          animation: 'spin 1s linear infinite',
+                        }),
+                      }}
+                    >
+                      <RiRefreshLine 
+                        size={18} 
+                        style={refreshingNodes ? {
+                          animation: 'spin 1s linear infinite',
+                        } : {}}
+                      />
+                    </ActionIcon>
                     <Button
                       variant="filled"
                       size="xs"

@@ -4,7 +4,7 @@ import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { Container, Title, Text, Select, Button, Group, Stack, Paper, ScrollArea, Badge, Menu, ActionIcon, Modal, TextInput, Tooltip, Textarea } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
-import { RiCheckLine, RiErrorWarningLine, RiRefreshLine, RiCheckboxCircleFill, RiCloseLine, RiAddLine, RiFileCodeLine, RiGitBranchLine, RiArrowRightLine, RiMoreFill, RiPencilLine, RiDeleteBinLine, RiDownloadLine, RiInformationLine, RiCodeLine, RiHistoryLine } from 'react-icons/ri';
+import { RiCheckLine, RiErrorWarningLine, RiRefreshLine, RiCheckboxCircleFill, RiCloseLine, RiAddLine, RiFileCodeLine, RiArrowRightLine, RiMoreFill, RiPencilLine, RiDeleteBinLine, RiDownloadLine, RiInformationLine, RiCodeLine, RiHistoryLine, RiFileCopyLine } from 'react-icons/ri';
 import CreateSpaceModal from './components/CreateSpaceModal';
 import ImportJsonModal from './components/ImportJsonModal';
 
@@ -53,6 +53,10 @@ export default function Home() {
   const [spaceForHistory, setSpaceForHistory] = useState<SpaceInfo | null>(null);
   const [historyDiff, setHistoryDiff] = useState<any>(null);
   const [loadingHistory, setLoadingHistory] = useState(false);
+  const [duplicateModalOpened, setDuplicateModalOpened] = useState(false);
+  const [spaceToDuplicate, setSpaceToDuplicate] = useState<SpaceInfo | null>(null);
+  const [newDuplicateSpaceName, setNewDuplicateSpaceName] = useState('');
+  const [isDuplicating, setIsDuplicating] = useState(false);
 
   useEffect(() => {
     // Fetch spaces on component mount
@@ -453,6 +457,70 @@ export default function Home() {
     setRenameModalOpened(true);
   };
 
+  const openDuplicateModal = (space: SpaceInfo) => {
+    setSpaceToDuplicate(space);
+    setNewDuplicateSpaceName(`${space.visibleName || space.name} (copy)`);
+    setDuplicateModalOpened(true);
+  };
+
+  const handleDuplicate = async () => {
+    if (!spaceToDuplicate || !newDuplicateSpaceName.trim()) {
+      return;
+    }
+
+    setIsDuplicating(true);
+    try {
+      const response = await fetch(`/api/spaces/${encodeURIComponent(spaceToDuplicate.name)}/duplicate`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ newSpaceName: newDuplicateSpaceName.trim() }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        notifications.show({
+          title: 'Clone Failed',
+          message: data.error || 'Failed to duplicate space',
+          color: 'red',
+          icon: <RiErrorWarningLine size={18} />,
+          autoClose: 5000,
+        });
+        setIsDuplicating(false);
+        return;
+      }
+
+      // Refresh spaces list
+      const res = await fetch('/api/spaces');
+      const spacesData: SpacesData = await res.json();
+      setSpaces(spacesData);
+      
+      notifications.show({
+        title: 'Clone Successful',
+        message: `Space cloned as "${newDuplicateSpaceName.trim()}" successfully`,
+        color: 'green',
+        icon: <RiCheckLine size={18} />,
+        autoClose: 5000,
+      });
+      setDuplicateModalOpened(false);
+      setSpaceToDuplicate(null);
+      setNewDuplicateSpaceName('');
+    } catch (error) {
+      console.error('Error duplicating space:', error);
+      notifications.show({
+        title: 'Clone Failed',
+        message: 'Failed to clone space',
+        color: 'red',
+        icon: <RiErrorWarningLine size={18} />,
+        autoClose: 5000,
+      });
+    } finally {
+      setIsDuplicating(false);
+    }
+  };
+
   const openUpdatePackagesModal = async (space: SpaceInfo) => {
     setSpaceToUpdate(space);
     try {
@@ -618,29 +686,6 @@ export default function Home() {
                   <Text size="sm" c="#888888">Import Json</Text>
                 </Group>
               </Paper>
-              <Paper
-                p="sm"
-                style={{
-                  border: '1px solid #333333',
-                  backgroundColor: 'transparent',
-                  cursor: 'pointer',
-                  flex: 1,
-                  textAlign: 'center',
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.borderColor = '#555555';
-                  e.currentTarget.style.backgroundColor = '#1a1a1a';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.borderColor = '#333333';
-                  e.currentTarget.style.backgroundColor = 'transparent';
-                }}
-              >
-                <Group gap="xs" justify="center" align="center">
-                  <RiGitBranchLine size={16} color="#888888" />
-                  <Text size="sm" c="#888888">Import from Git</Text>
-                </Group>
-              </Paper>
             </Group>
           </div>
 
@@ -741,6 +786,16 @@ export default function Home() {
                                   }}
                                 >
                                   History
+                                </Menu.Item>
+                                <Menu.Item
+                                  leftSection={<RiFileCopyLine size={16} />}
+                                  style={{ color: '#ffffff' }}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    openDuplicateModal(space);
+                                  }}
+                                >
+                                  Clone Space
                                 </Menu.Item>
                                 <Menu.Item
                                   leftSection={<RiPencilLine size={16} />}
@@ -891,7 +946,7 @@ export default function Home() {
                       <Group gap="xs" align="center" style={{ marginLeft: '1rem' }}>
                         <RiCheckboxCircleFill size={16} color="#00d9ff" />
                         <Text size="sm" c="#00d9ff" fw={500}>
-                          VI is ready ({selectedSpace})
+                          Space {selectedSpace} is ready
                         </Text>
                       </Group>
                     )}
@@ -1045,6 +1100,77 @@ export default function Home() {
               }}
             >
               {isRenaming ? 'Renaming...' : 'Rename'}
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+
+      <Modal
+        opened={duplicateModalOpened}
+        onClose={() => {
+          if (!isDuplicating) {
+            setDuplicateModalOpened(false);
+            setSpaceToDuplicate(null);
+            setNewDuplicateSpaceName('');
+          }
+        }}
+        title={
+          <Text size="lg" fw={600} c="#ffffff">
+            Clone Space
+          </Text>
+        }
+        size="md"
+        closeOnClickOutside={!isDuplicating}
+        closeOnEscape={!isDuplicating}
+        styles={{
+          title: { color: '#ffffff' },
+          content: { backgroundColor: '#1a1b1e', borderRadius: '8px' },
+          header: { backgroundColor: '#25262b', borderBottom: '1px solid #373a40', padding: '20px' },
+          body: { backgroundColor: '#1a1b1e', padding: '24px' },
+        }}
+      >
+        <Stack gap="md">
+          <Text size="sm" c="#888888">
+            This will create a new space with a copy of the space.json from "{spaceToDuplicate?.visibleName || spaceToDuplicate?.name}".
+          </Text>
+          <TextInput
+            label="New Space Name"
+            placeholder="Enter new space name"
+            value={newDuplicateSpaceName}
+            onChange={(e) => setNewDuplicateSpaceName(e.currentTarget.value)}
+            disabled={isDuplicating}
+            styles={{
+              label: { color: '#ffffff', marginBottom: '8px' },
+              input: {
+                backgroundColor: '#25262b',
+                border: '1px solid #373a40',
+                color: '#ffffff',
+                '&:focus': { borderColor: '#0070f3' },
+              },
+            }}
+          />
+          <Group justify="flex-end" mt="md">
+            <Button
+              variant="subtle"
+              onClick={() => {
+                setDuplicateModalOpened(false);
+                setSpaceToDuplicate(null);
+                setNewDuplicateSpaceName('');
+              }}
+              disabled={isDuplicating}
+              style={{ color: '#888888' }}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleDuplicate}
+              disabled={isDuplicating || !newDuplicateSpaceName.trim()}
+              style={{
+                backgroundColor: '#0070f3',
+                color: '#ffffff',
+              }}
+            >
+              {isDuplicating ? 'Cloning...' : 'Clone'}
             </Button>
           </Group>
         </Stack>

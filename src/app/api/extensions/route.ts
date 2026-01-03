@@ -46,6 +46,77 @@ async function getGitMetadata(nodePath: string): Promise<{ githubUrl?: string; b
   }
 }
 
+async function getSuccessfullyImportedNodes(spaceId: string): Promise<Set<string>> {
+  const spacesPath = join(process.cwd(), 'spaces');
+  const comfyLogFilePath = join(spacesPath, spaceId, 'comfy-logs.txt');
+  const successfullyImportedNodes = new Set<string>();
+
+  try {
+    if (!existsSync(comfyLogFilePath)) {
+      return successfullyImportedNodes;
+    }
+
+    const logContent = await readFile(comfyLogFilePath, 'utf-8');
+    const lines = logContent.split('\n');
+
+    // Find the line with "Import times for custom nodes"
+    let foundImportTimes = false;
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      
+      if (line.includes('Import times for custom nodes')) {
+        foundImportTimes = true;
+        // Process subsequent lines until we hit a line that doesn't match the pattern
+        for (let j = i + 1; j < lines.length; j++) {
+          const importLine = lines[j];
+          
+          // Stop if we hit an empty line or a line that doesn't look like an import time entry
+          if (!importLine.trim() || !importLine.includes('seconds:')) {
+            // Check if the next few lines still match the pattern
+            let stillMatching = false;
+            for (let k = j; k < Math.min(j + 3, lines.length); k++) {
+              if (lines[k].includes('seconds:')) {
+                stillMatching = true;
+                break;
+              }
+            }
+            if (!stillMatching) {
+              break;
+            }
+          }
+
+          // Extract node name from path like:
+          // /Users/.../spaces/.../ComfyUI/custom_nodes/ComfyUI-GGUF
+          // or
+          // /Users/.../spaces/.../ComfyUI/custom_nodes/ComfyUI-GGUF/...
+          const pathMatch = importLine.match(/custom_nodes\/([^\/\s]+)/);
+          if (pathMatch) {
+            const nodeName = pathMatch[1];
+            
+            // Skip .py files (they're not nodes)
+            if (nodeName.endsWith('.py')) {
+              continue;
+            }
+
+            // Check if this line contains "(Import Failed)"
+            if (!importLine.includes('(Import Failed)')) {
+              // Normalize node name (handle "core" vs "ComfyUI-Core")
+              const normalizedName = nodeName === 'core' ? 'ComfyUI-Core' : nodeName;
+              successfullyImportedNodes.add(normalizedName);
+            }
+          }
+        }
+        break;
+      }
+    }
+  } catch (error) {
+    // If we can't read the log file, just return empty set
+    console.warn(`Failed to read comfy-logs.txt for space ${spaceId}:`, error);
+  }
+
+  return successfullyImportedNodes;
+}
+
 export async function GET(request: NextRequest) {
   try {
     // Get selected space from query parameter or selected_version.txt
@@ -133,6 +204,9 @@ export async function GET(request: NextRequest) {
     // Create a set for quick lookup
     const nodesInDataDirSet = new Set(nodesInDataDir);
 
+    // Get successfully imported nodes from ComfyUI logs
+    const successfullyImportedNodes = await getSuccessfullyImportedNodes(spaceId);
+
     // Determine status for each node
     const nodeStatuses: NodeStatus[] = [];
 
@@ -185,7 +259,7 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // Check for nodes in custom_nodes that don't exist in API (failed)
+    // Check for nodes in custom_nodes that don't exist in API
     for (const nodeName of nodesInDataDir) {
       // Skip core nodes as they're special
       if (nodeName === 'ComfyUI-Core' || nodeName === 'core') {
@@ -197,9 +271,13 @@ export async function GET(request: NextRequest) {
         const nodePath = join(nodesDataPath, actualNodeName);
         const gitMetadata = await getGitMetadata(nodePath);
         
+        // Check if node was successfully imported according to logs
+        // If it was successfully imported, mark it as active even if not in API
+        const isSuccessfullyImported = successfullyImportedNodes.has(nodeName);
+        
         nodeStatuses.push({
           name: nodeName,
-          status: 'failed',
+          status: isSuccessfullyImported ? 'active' : 'failed',
           existsInApi: false,
           existsInDataNodes: true,
           ...gitMetadata,
