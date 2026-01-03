@@ -136,10 +136,6 @@ export async function POST(request: NextRequest) {
     const spaceRequirementsPath = join(spacePath, 'requirements.txt');
     await writeFile(spaceRequirementsPath, requirementsContent, 'utf-8');
 
-    // Copy requirements.bkp
-    const spaceBackupPath = join(spacePath, 'requirements.bkp');
-    await writeFile(spaceBackupPath, requirementsContent, 'utf-8');
-
     // Create space.json with nodes, dependencies, and metadata
     const spaceJson = {
       nodes: [],

@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server';
 import { join } from 'path';
 import { spawn, exec } from 'child_process';
 import { existsSync, appendFileSync, mkdirSync, writeFileSync, createWriteStream, readFileSync, statSync } from 'fs';
+import { readdir } from 'fs/promises';
 import { promisify } from 'util';
 
 const execAsync = promisify(exec);
@@ -184,6 +185,190 @@ async function updateRequirementsTxt(
     }
   } catch (error: any) {
     sendLog(controller, encoder, `[WARN] Error updating requirements.txt: ${error.message}`, logFile);
+  }
+}
+
+async function createRequirementsBkpIfMissing(
+  pipExec: string,
+  spacePath: string,
+  controller: ReadableStreamDefaultController,
+  encoder: TextEncoder,
+  logFile: string
+): Promise<void> {
+  try {
+    const backupPath = join(spacePath, 'requirements.bkp');
+    
+    // Check if requirements.bkp already exists
+    if (existsSync(backupPath)) {
+      sendLog(controller, encoder, `[APP] requirements.bkp already exists, skipping creation`, logFile);
+      return;
+    }
+
+    sendLog(controller, encoder, `[APP] requirements.bkp not found. Creating from pip list...`, logFile);
+    
+    const pipListProcess = spawn(pipExec, ['list', '--format=freeze'], {
+      cwd: spacePath,
+      env: { ...process.env },
+      shell: true,
+    });
+
+    let pipListOutput = '';
+    let pipListError = '';
+
+    pipListProcess.stdout?.on('data', (data) => {
+      pipListOutput += data.toString();
+    });
+
+    pipListProcess.stderr?.on('data', (data) => {
+      pipListError += data.toString();
+    });
+
+    const pipListCode = await new Promise<number>((resolve) => {
+      pipListProcess.on('close', (code) => {
+        resolve(code || 0);
+      });
+      pipListProcess.on('error', () => {
+        resolve(1);
+      });
+    });
+
+    if (pipListCode === 0 && pipListOutput.trim()) {
+      writeFileSync(backupPath, pipListOutput, 'utf-8');
+      sendLog(controller, encoder, `[APP] requirements.bkp created successfully`, logFile);
+    } else {
+      sendLog(controller, encoder, `[WARN] Failed to create requirements.bkp: ${pipListError || 'Unknown error'}`, logFile);
+    }
+  } catch (error: any) {
+    sendLog(controller, encoder, `[WARN] Error creating requirements.bkp: ${error.message}`, logFile);
+  }
+}
+
+async function getGitBranchAndCommit(nodePath: string): Promise<{ branch: string | null; commitId: string | null }> {
+  try {
+    // Check if .git directory exists
+    const gitPath = join(nodePath, '.git');
+    if (!existsSync(gitPath)) {
+      return { branch: null, commitId: null };
+    }
+
+    // Get current branch
+    let branch: string | null = null;
+    try {
+      const { stdout: branchOutput } = await withTimeout(
+        execAsync('git rev-parse --abbrev-ref HEAD', { cwd: nodePath }),
+        5000,
+        'Timeout getting git branch'
+      );
+      branch = branchOutput.trim() || null;
+    } catch (error) {
+      // Branch might not be available, continue
+    }
+
+    // Get current commit ID
+    let commitId: string | null = null;
+    try {
+      const { stdout: commitOutput } = await withTimeout(
+        execAsync('git rev-parse HEAD', { cwd: nodePath }),
+        5000,
+        'Timeout getting git commit'
+      );
+      commitId = commitOutput.trim() || null;
+    } catch (error) {
+      // Commit might not be available, continue
+    }
+
+    return { branch, commitId };
+  } catch (error) {
+    return { branch: null, commitId: null };
+  }
+}
+
+async function updateCustomNodesGitInfo(
+  spacePath: string,
+  controller: ReadableStreamDefaultController,
+  encoder: TextEncoder,
+  logFile: string
+): Promise<void> {
+  try {
+    sendLog(controller, encoder, `[APP] Scanning custom_nodes for git branch and commit information...`, logFile);
+    
+    const customNodesPath = join(spacePath, 'ComfyUI', 'custom_nodes');
+    const spaceJsonPath = join(spacePath, 'space.json');
+
+    // Check if custom_nodes directory exists
+    if (!existsSync(customNodesPath)) {
+      sendLog(controller, encoder, `[INFO] custom_nodes directory not found, skipping git info update`, logFile);
+      return;
+    }
+
+    // Check if space.json exists
+    if (!existsSync(spaceJsonPath)) {
+      sendLog(controller, encoder, `[WARN] space.json not found, skipping git info update`, logFile);
+      return;
+    }
+
+    // Read space.json
+    const spaceJsonContent = readFileSync(spaceJsonPath, 'utf-8');
+    const spaceJson = JSON.parse(spaceJsonContent);
+
+    // Ensure nodes array exists
+    if (!Array.isArray(spaceJson.nodes)) {
+      spaceJson.nodes = [];
+    }
+
+    // Read all directories in custom_nodes
+    const entries = await readdir(customNodesPath, { withFileTypes: true });
+    const nodeDirectories = entries
+      .filter(entry => entry.isDirectory())
+      .map(entry => entry.name)
+      .filter(name => !name.startsWith('.') && name !== '__pycache__');
+
+    sendLog(controller, encoder, `[APP] Found ${nodeDirectories.length} custom node directory(ies)`, logFile);
+
+    // Create a map of existing nodes by name for quick lookup
+    const nodesMap = new Map<string, any>();
+    spaceJson.nodes.forEach((node: any) => {
+      nodesMap.set(node.name, node);
+    });
+
+    // Update git info for each node directory
+    for (const nodeName of nodeDirectories) {
+      const nodePath = join(customNodesPath, nodeName);
+      const { branch, commitId } = await getGitBranchAndCommit(nodePath);
+
+      if (branch || commitId) {
+        // Find or create node entry
+        let node = nodesMap.get(nodeName);
+        if (!node) {
+          // Create new node entry
+          node = {
+            name: nodeName,
+            githubUrl: null,
+            commitId: null,
+            branch: null,
+            installedAt: new Date().toISOString(),
+            disabled: false
+          };
+          spaceJson.nodes.push(node);
+          nodesMap.set(nodeName, node);
+        }
+
+        // Update git info
+        const updated = (node.branch !== branch) || (node.commitId !== commitId);
+        node.branch = branch;
+        node.commitId = commitId;
+
+        if (updated) {
+          sendLog(controller, encoder, `[APP] Updated ${nodeName}: branch=${branch || 'N/A'}, commit=${commitId ? commitId.substring(0, 7) : 'N/A'}`, logFile);
+        }
+      }
+    }
+
+    // Write updated space.json
+    writeFileSync(spaceJsonPath, JSON.stringify(spaceJson, null, 2), 'utf-8');
+    sendLog(controller, encoder, `[APP] space.json updated with custom_nodes git information`, logFile);
+  } catch (error: any) {
+    sendLog(controller, encoder, `[WARN] Error updating custom_nodes git info: ${error.message}`, logFile);
   }
 }
 
@@ -605,6 +790,17 @@ export async function GET(request: NextRequest) {
         } else {
           sendLog(controller, encoder, `[WARN] space.json not found, skipping dependency installation`, logFilePath);
         }
+
+        // Create requirements.bkp if it doesn't exist
+        await createRequirementsBkpIfMissing(pipExec, spacePath, controller, encoder, logFilePath);
+
+        if (isCancelled) {
+          controller.close();
+          return;
+        }
+
+        // Step 2.5: Update custom_nodes git information in space.json
+        await updateCustomNodesGitInfo(spacePath, controller, encoder, logFilePath);
 
         if (isCancelled) {
           controller.close();

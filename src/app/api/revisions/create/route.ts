@@ -56,10 +56,6 @@ export async function POST() {
     const newRequirementsPath = join(nextVersionPath, 'requirements.txt');
     await copyFile(currentRequirementsPath, newRequirementsPath);
 
-    // Create requirements.bkp from requirements.txt in new revision
-    const newBackupPath = join(nextVersionPath, 'requirements.bkp');
-    await copyFile(newRequirementsPath, newBackupPath);
-
     // Create venv in new revision
     const venvPath = join(nextVersionPath, 'venv');
     await new Promise<void>((resolve, reject) => {

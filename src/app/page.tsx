@@ -2,9 +2,9 @@
 
 import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { Container, Title, Text, Select, Button, Group, Stack, Paper, ScrollArea, Badge, Menu, ActionIcon, Modal, TextInput } from '@mantine/core';
+import { Container, Title, Text, Select, Button, Group, Stack, Paper, ScrollArea, Badge, Menu, ActionIcon, Modal, TextInput, Tooltip, Textarea } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
-import { RiCheckLine, RiErrorWarningLine, RiRefreshLine, RiCheckboxCircleFill, RiCloseLine, RiAddLine, RiFileCodeLine, RiGitBranchLine, RiArrowRightLine, RiMoreFill, RiPencilLine, RiDeleteBinLine, RiDownloadLine } from 'react-icons/ri';
+import { RiCheckLine, RiErrorWarningLine, RiRefreshLine, RiCheckboxCircleFill, RiCloseLine, RiAddLine, RiFileCodeLine, RiGitBranchLine, RiArrowRightLine, RiMoreFill, RiPencilLine, RiDeleteBinLine, RiDownloadLine, RiInformationLine, RiCodeLine } from 'react-icons/ri';
 import CreateSpaceModal from './components/CreateSpaceModal';
 import ImportJsonModal from './components/ImportJsonModal';
 
@@ -35,6 +35,7 @@ export default function Home() {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [showLogs, setShowLogs] = useState(false);
   const [isComfyUIReady, setIsComfyUIReady] = useState(false);
+  const [activationFailed, setActivationFailed] = useState(false);
   const logsEndRef = useRef<HTMLDivElement>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
   const [createSpaceModalOpened, setCreateSpaceModalOpened] = useState(false);
@@ -44,6 +45,10 @@ export default function Home() {
   const [newSpaceName, setNewSpaceName] = useState('');
   const [isRenaming, setIsRenaming] = useState(false);
   const [spaceToDelete, setSpaceToDelete] = useState<SpaceInfo | null>(null);
+  const [updatePackagesModalOpened, setUpdatePackagesModalOpened] = useState(false);
+  const [spaceToUpdate, setSpaceToUpdate] = useState<SpaceInfo | null>(null);
+  const [requirementsContent, setRequirementsContent] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
     // Fetch spaces on component mount
@@ -116,6 +121,7 @@ export default function Home() {
     setLogs([]);
     setShowLogs(true);
     setIsComfyUIReady(false);
+    setActivationFailed(false);
 
     // Close existing event source if any
     if (eventSourceRef.current) {
@@ -136,6 +142,7 @@ export default function Home() {
       const data = await response.json();
 
       if (!response.ok) {
+        setActivationFailed(true);
         notifications.show({
           title: 'Error',
           message: data.error || 'Failed to activate space',
@@ -175,6 +182,7 @@ export default function Home() {
           if (logEntry.message.includes('Activation cancelled by user')) {
             setIsActivating(false);
             setIsComfyUIReady(false);
+            setActivationFailed(false);
             notifications.show({
               title: 'Cancelled',
               message: 'Activation cancelled',
@@ -185,8 +193,20 @@ export default function Home() {
             return;
           }
           
-          // Check if ComfyUI is ready - look for messages in both APP and COMFY logs
+          // Check for activation failures
           const message = logEntry.message;
+          if (message.includes('[ERROR]') || 
+              message.includes('Failed to install dependencies') ||
+              message.includes('ERROR:') ||
+              message.includes('ResolutionImpossible') ||
+              message.includes('Activation failed')) {
+            setActivationFailed(true);
+            setIsActivating(false);
+            setIsComfyUIReady(false);
+            return;
+          }
+          
+          // Check if ComfyUI is ready - look for messages in both APP and COMFY logs
           if (message.includes('To see the GUI go to:') || 
               message.includes('Starting server') ||
               message.includes('Server started') ||
@@ -194,6 +214,7 @@ export default function Home() {
               (message.includes('[COMFY]') && (message.includes('Running on') || message.includes('Server started')))) {
             setIsComfyUIReady(true);
             setIsActivating(false);
+            setActivationFailed(false);
           }
         } catch (error) {
           console.error('Error parsing log data:', error);
@@ -207,6 +228,7 @@ export default function Home() {
           eventSource.close();
           eventSourceRef.current = null;
           setIsActivating(false);
+          setActivationFailed(true);
           notifications.show({
             title: 'Error',
             message: 'Failed to activate space',
@@ -221,6 +243,7 @@ export default function Home() {
       // They can manually navigate when ready
     } catch (error) {
       console.error('Error activating space:', error);
+      setActivationFailed(true);
       notifications.show({
         title: 'Error',
         message: 'Failed to activate space',
@@ -426,6 +449,93 @@ export default function Home() {
     setRenameModalOpened(true);
   };
 
+  const openUpdatePackagesModal = async (space: SpaceInfo) => {
+    setSpaceToUpdate(space);
+    try {
+      const response = await fetch(`/api/spaces/${encodeURIComponent(space.name)}/requirements`);
+      if (!response.ok) {
+        const error = await response.json();
+        notifications.show({
+          title: 'Error',
+          message: error.error || 'Failed to load requirements',
+          color: 'red',
+          icon: <RiErrorWarningLine size={18} />,
+          autoClose: 5000,
+        });
+        return;
+      }
+      const data = await response.json();
+      setRequirementsContent(data.content || '');
+      setUpdatePackagesModalOpened(true);
+    } catch (error) {
+      console.error('Error loading requirements:', error);
+      notifications.show({
+        title: 'Error',
+        message: 'Failed to load requirements',
+        color: 'red',
+        icon: <RiErrorWarningLine size={18} />,
+        autoClose: 5000,
+      });
+    }
+  };
+
+  const handleSaveAndActivate = async () => {
+    if (!spaceToUpdate) return;
+
+    setIsSaving(true);
+    try {
+      // Save requirements.txt
+      const response = await fetch(`/api/spaces/${encodeURIComponent(spaceToUpdate.name)}/requirements`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ content: requirementsContent }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        notifications.show({
+          title: 'Save Failed',
+          message: error.error || 'Failed to save requirements',
+          color: 'red',
+          icon: <RiErrorWarningLine size={18} />,
+          autoClose: 5000,
+        });
+        setIsSaving(false);
+        return;
+      }
+
+      // Close modal
+      setUpdatePackagesModalOpened(false);
+      setSpaceToUpdate(null);
+      setRequirementsContent('');
+
+      // Activate the space
+      setSelectedSpace(spaceToUpdate.name);
+      await handleActivate();
+
+      notifications.show({
+        title: 'Success',
+        message: 'Requirements updated and space activated',
+        color: 'green',
+        icon: <RiCheckLine size={18} />,
+        autoClose: 5000,
+      });
+    } catch (error) {
+      console.error('Error saving requirements:', error);
+      notifications.show({
+        title: 'Save Failed',
+        message: 'Failed to save requirements',
+        color: 'red',
+        icon: <RiErrorWarningLine size={18} />,
+        autoClose: 5000,
+      });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   return (
     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', backgroundColor: '#000000', paddingTop: '2rem', paddingBottom: '2rem' }}>
       <Container size="xl" py="xl" style={{ width: '100%' }}>
@@ -586,6 +696,16 @@ export default function Home() {
                                   Export Json
                                 </Menu.Item>
                                 <Menu.Item
+                                  leftSection={<RiCodeLine size={16} />}
+                                  style={{ color: '#ffffff' }}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    openUpdatePackagesModal(space);
+                                  }}
+                                >
+                                  Update Packages
+                                </Menu.Item>
+                                <Menu.Item
                                   leftSection={<RiPencilLine size={16} />}
                                   style={{ color: '#ffffff' }}
                                   onClick={(e) => {
@@ -739,18 +859,34 @@ export default function Home() {
                       </Group>
                     )}
                   </Group>
-                  <Button
-                    variant={isComfyUIReady ? "filled" : "subtle"}
-                    size="sm"
-                    onClick={() => router.push('/active')}
-                    disabled={!isComfyUIReady}
-                    style={{
-                      backgroundColor: isComfyUIReady ? '#0070f3' : undefined,
-                      color: isComfyUIReady ? '#ffffff' : '#000000',
-                    }}
-                  >
-                    Go to Dashboard
-                  </Button>
+                  {activationFailed ? (
+                    <Group gap="xs" align="center">
+                      <Text size="sm" c="red" fw={500}>
+                        FAILED
+                      </Text>
+                      <Tooltip
+                        label="Activation failures are usually caused by missing or incompatible dependencies. From the Spaces list, click the three-dot menu to update dependencies or adjust their versions, then try activating the space again."
+                        multiline
+                        w={300}
+                        withArrow
+                      >
+                        <RiInformationLine size={16} color="red" style={{ cursor: 'help' }} />
+                      </Tooltip>
+                    </Group>
+                  ) : (
+                    <Button
+                      variant={isComfyUIReady ? "filled" : "subtle"}
+                      size="sm"
+                      onClick={() => router.push('/active')}
+                      disabled={!isComfyUIReady}
+                      style={{
+                        backgroundColor: isComfyUIReady ? '#0070f3' : undefined,
+                        color: isComfyUIReady ? '#ffffff' : '#000000',
+                      }}
+                    >
+                      Go to Dashboard
+                    </Button>
+                  )}
                 </Group>
               </Stack>
             </Paper>
@@ -872,6 +1008,134 @@ export default function Home() {
               }}
             >
               {isRenaming ? 'Renaming...' : 'Rename'}
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+
+      <Modal
+        opened={updatePackagesModalOpened}
+        onClose={() => {
+          setUpdatePackagesModalOpened(false);
+          setSpaceToUpdate(null);
+          setRequirementsContent('');
+        }}
+        title={
+          <Text fw={600} size="lg" c="#ffffff">
+            Update Packages - {spaceToUpdate?.visibleName || spaceToUpdate?.name}
+          </Text>
+        }
+        size="xl"
+        styles={{
+          content: { 
+            backgroundColor: '#1a1b1e',
+            maxHeight: '90vh',
+            display: 'flex',
+            flexDirection: 'column',
+          },
+          header: { backgroundColor: '#1a1b1e', borderBottom: '1px solid #373a40' },
+          body: { 
+            backgroundColor: '#1a1b1e',
+            flex: 1,
+            overflow: 'hidden',
+            display: 'flex',
+            flexDirection: 'column',
+          }
+        }}
+      >
+        <Stack gap="md" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+          <Text size="sm" c="#888888">
+            Edit the requirements.txt file below. Each line should contain a package name and optional version specification.
+          </Text>
+          <Paper
+            p="sm"
+            style={{
+              backgroundColor: '#0a0a0a',
+              border: '1px solid #373a40',
+              position: 'relative',
+              flex: 1,
+              minHeight: 0,
+              display: 'flex',
+              flexDirection: 'column',
+            }}
+          >
+            <ScrollArea h="calc(90vh - 250px)">
+              <div style={{ display: 'flex' }}>
+                {/* Line numbers */}
+                <div
+                  style={{
+                    padding: '8px 8px 8px 12px',
+                    fontFamily: 'monospace',
+                    fontSize: '12px',
+                    lineHeight: '1.6',
+                    color: '#666666',
+                    backgroundColor: '#0a0a0a',
+                    borderRight: '1px solid #373a40',
+                    userSelect: 'none',
+                    minWidth: '50px',
+                    textAlign: 'right',
+                    flexShrink: 0,
+                  }}
+                >
+                  {requirementsContent.split('\n').map((_, index) => (
+                    <div key={index} style={{ minHeight: '19.2px' }}>
+                      {index + 1}
+                    </div>
+                  ))}
+                  {requirementsContent === '' && (
+                    <div style={{ minHeight: '19.2px' }}>1</div>
+                  )}
+                </div>
+                {/* Textarea */}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <Textarea
+                    value={requirementsContent}
+                    onChange={(e) => setRequirementsContent(e.currentTarget.value)}
+                    placeholder="package==version&#10;another-package>=1.0.0"
+                    autosize
+                    minRows={Math.max(20, requirementsContent.split('\n').length || 1)}
+                    styles={{
+                      input: {
+                        fontFamily: 'monospace',
+                        fontSize: '12px',
+                        lineHeight: '1.6',
+                        backgroundColor: '#0a0a0a',
+                        color: '#ffffff',
+                        border: 'none',
+                        padding: '8px',
+                        width: '100%',
+                        resize: 'none',
+                      },
+                      wrapper: {
+                        width: '100%',
+                      },
+                    }}
+                  />
+                </div>
+              </div>
+            </ScrollArea>
+          </Paper>
+          <Group justify="flex-end" mt="md">
+            <Button
+              variant="subtle"
+              onClick={() => {
+                setUpdatePackagesModalOpened(false);
+                setSpaceToUpdate(null);
+                setRequirementsContent('');
+              }}
+              style={{ color: '#888888' }}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSaveAndActivate}
+              loading={isSaving}
+              style={{
+                backgroundColor: '#0070f3',
+                color: '#ffffff',
+              }}
+            >
+              Save & Activate
             </Button>
           </Group>
         </Stack>
