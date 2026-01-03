@@ -1,9 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { Container, Title, Text, Stack, Button, Grid, Card, Group, Menu, ActionIcon, Modal, ScrollArea, Paper, Badge } from '@mantine/core';
 import { useRouter } from 'next/navigation';
-import { RiHomeLine, RiCheckboxCircleFill, RiCloseCircleFill, RiDownloadLine, RiPencilLine, RiMoreFill, RiDeleteBinLine, RiStopCircleLine, RiHistoryLine, RiFileListLine, RiArrowDownSLine, RiArrowUpSLine, RiExternalLinkLine, RiAddLine, RiRefreshLine } from 'react-icons/ri';
+import { RiHomeLine, RiCheckboxCircleFill, RiCloseCircleFill, RiDownloadLine, RiPencilLine, RiMoreFill, RiDeleteBinLine, RiStopCircleLine, RiHistoryLine, RiFileListLine, RiArrowDownSLine, RiArrowUpSLine, RiExternalLinkLine, RiAddLine, RiRefreshLine, RiCircleFill } from 'react-icons/ri';
 import LogSidebar from './components/LogSidebar';
 import NodeTreeModal from './components/NodeTreeModal';
 
@@ -33,22 +33,12 @@ interface Dependency {
   fullLine: string;
 }
 
-interface Model {
-  name: string;
-  type: string;
-  size: number;
-  path: string;
-  formattedSize?: string;
-}
-
 export default function ActivePage() {
   const [selectedVersion, setSelectedVersion] = useState<string>('');
   const [spaces, setSpaces] = useState<SpaceInfo[]>([]);
   const [nodes, setNodes] = useState<Node[]>([]);
   const [dependencies, setDependencies] = useState<Dependency[]>([]);
   const [dependenciesExpanded, setDependenciesExpanded] = useState(false);
-  const [models, setModels] = useState<Model[]>([]);
-  const [modelsExpanded, setModelsExpanded] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
@@ -56,9 +46,13 @@ export default function ActivePage() {
   const [changesModalOpened, setChangesModalOpened] = useState(false);
   const [changesDiff, setChangesDiff] = useState<any>(null);
   const [loadingChanges, setLoadingChanges] = useState(false);
-  const [creatingSpace, setCreatingSpace] = useState(false);
-  const [nextSpaceName, setNextSpaceName] = useState<string>('');
   const [logsSidebarOpen, setLogsSidebarOpen] = useState(false);
+  const [comfyUIOnline, setComfyUIOnline] = useState(false);
+  const [comfyUIRestarting, setComfyUIRestarting] = useState(false);
+  const [restartLogs, setRestartLogs] = useState<Array<{ message: string; timestamp: string }>>([]);
+  const [showRestartLogs, setShowRestartLogs] = useState(false);
+  const restartEventSourceRef = useRef<EventSource | null>(null);
+  const restartLogsEndRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
 
   const handleUpdate = (node: Node) => {
@@ -133,76 +127,143 @@ export default function ActivePage() {
       return;
     }
 
+    setComfyUIRestarting(true);
+    setComfyUIOnline(false);
+    setRestartLogs([]);
+    setShowRestartLogs(true);
+
+    // Close existing event source if any
+    if (restartEventSourceRef.current) {
+      restartEventSourceRef.current.close();
+      restartEventSourceRef.current = null;
+    }
+
     try {
-      // Call restart endpoint to get the current version
-      const restartResponse = await fetch('/api/activate/restart', {
-        method: 'POST',
-      });
-
-      if (!restartResponse.ok) {
-        const data = await restartResponse.json();
-        alert(data.error || 'Failed to restart ComfyUI');
-        return;
-      }
-
-      const restartData = await restartResponse.json();
-      const versionToRestart = restartData.version || selectedVersion;
-
-      // Activate the space again (this will kill the existing process and restart)
-      const activateResponse = await fetch('/api/activate', {
+      // First, save the selected version (this will also kill the port)
+      const response = await fetch('/api/activate', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ version: versionToRestart }),
+        body: JSON.stringify({ version: selectedVersion }),
       });
 
-      if (!activateResponse.ok) {
-        const data = await activateResponse.json();
+      const data = await response.json();
+
+      if (!response.ok) {
+        setComfyUIRestarting(false);
         alert(data.error || 'Failed to restart ComfyUI');
+        setShowRestartLogs(false);
         return;
       }
 
-      // Navigate to home page to see the activation logs
-      router.push('/');
+      // Connect to log stream to see restart progress
+      const eventSource = new EventSource(`/api/activate/stream?version=${encodeURIComponent(selectedVersion)}`);
+      restartEventSourceRef.current = eventSource;
+
+      eventSource.onopen = () => {
+        console.log('Restart log stream connected');
+      };
+
+      eventSource.onmessage = (event) => {
+        try {
+          const logEntry = JSON.parse(event.data);
+          setRestartLogs((prev) => [...prev, logEntry]);
+          
+          const message = logEntry.message;
+          
+          // Check for restart failures
+          if (message.includes('[ERROR]') || 
+              message.includes('Failed to install dependencies') ||
+              message.includes('ERROR:') ||
+              message.includes('ResolutionImpossible') ||
+              message.includes('Activation failed')) {
+            setComfyUIRestarting(false);
+            return;
+          }
+          
+          // Check if ComfyUI is ready - look for messages indicating server started
+          if (message.includes('To see the GUI go to:') || 
+              message.includes('Starting server') ||
+              message.includes('Server started') ||
+              message.includes('Running on') ||
+              (message.includes('[COMFY]') && (message.includes('Running on') || message.includes('Server started')))) {
+            setComfyUIOnline(true);
+            setComfyUIRestarting(false);
+            // Refresh nodes list when restart completes
+            if (selectedVersion) {
+              fetchNodesForSpace(selectedVersion);
+            }
+            // Keep logs visible for a bit, then auto-hide after 3 seconds
+            setTimeout(() => {
+              setShowRestartLogs(false);
+              setRestartLogs([]);
+            }, 3000);
+          }
+        } catch (error) {
+          console.error('Error parsing log data:', error);
+        }
+      };
+
+      eventSource.onerror = (error) => {
+        console.error('EventSource error:', error);
+        if (restartEventSourceRef.current) {
+          restartEventSourceRef.current.close();
+          restartEventSourceRef.current = null;
+          setComfyUIRestarting(false);
+        }
+      };
     } catch (error) {
       console.error('Error restarting ComfyUI:', error);
       alert('Failed to restart ComfyUI');
+      setComfyUIRestarting(false);
+      setShowRestartLogs(false);
     }
+  };
+
+  // Helper function to render log message with colored tags
+  const renderLogMessage = (message: string) => {
+    // Check for [APP] tag
+    const appTagMatch = message.match(/^\[APP\]\s*(.*)$/);
+    if (appTagMatch) {
+      const restOfMessage = appTagMatch[1];
+      return (
+        <>
+          <span style={{ color: '#4dabf7', fontWeight: 'bold' }}>[APP]</span>
+          {restOfMessage && ' '}
+          <span>{restOfMessage}</span>
+        </>
+      );
+    }
+    
+    // Check for [COMFY] tag
+    const comfyTagMatch = message.match(/^\[COMFY\]\s*(.*)$/);
+    if (comfyTagMatch) {
+      const restOfMessage = comfyTagMatch[1];
+      return (
+        <>
+          <span style={{ color: '#51cf66', fontWeight: 'bold' }}>[COMFY]</span>
+          {restOfMessage && ' '}
+          <span>{restOfMessage}</span>
+        </>
+      );
+    }
+    
+    // No tag, return as-is
+    return <span>{message}</span>;
   };
 
   const handleShowChanges = async () => {
     setLoadingChanges(true);
     setChangesModalOpened(true);
     try {
-      const [diffResponse, spacesResponse] = await Promise.all([
-        fetch('/api/requirements/diff'),
-        fetch('/api/spaces')
-      ]);
-      
+      const diffResponse = await fetch('/api/requirements/diff');
       const diffData = await diffResponse.json();
-      const spacesData = await spacesResponse.json();
       
       if (!diffResponse.ok) {
         setChangesDiff({ error: diffData.error || 'Failed to load changes' });
       } else {
         setChangesDiff(diffData);
-      }
-
-      // Calculate next space name
-      if (spacesData.spaces && spacesData.spaces.length > 0) {
-        const versions = spacesData.spaces
-          .map((s: SpaceInfo) => {
-            const match = s.name.match(/^v(\d+)$/);
-            return match ? parseInt(match[1], 10) : 0;
-          })
-          .filter((v: number) => v > 0)
-          .sort((a: number, b: number) => b - a);
-        
-        const nextVersionNumber = versions.length > 0 ? versions[0] + 1 : 2;
-        setNextSpaceName(`v${nextVersionNumber}`);
-      } else {
-        setNextSpaceName('v2');
       }
     } catch (error) {
       console.error('Error fetching changes:', error);
@@ -267,10 +328,9 @@ export default function ActivePage() {
     Promise.all([
       fetch('/api/spaces').then(res => res.json()),
       fetch('/api/extensions').then(res => res.json()),
-      fetch('/api/requirements').then(res => res.json()),
-      fetch('/api/models').then(res => res.json())
+      fetch('/api/requirements').then(res => res.json())
     ])
-      .then(async ([spaceData, extensionsData, requirementsData, modelsData]) => {
+      .then(async ([spaceData, extensionsData, requirementsData]) => {
         setSelectedVersion(spaceData.selectedVersion);
         setSpaces(spaceData.spaces || []);
         
@@ -294,12 +354,6 @@ export default function ActivePage() {
         } else {
           setDependencies(requirementsData.dependencies || []);
         }
-        if (modelsData.error) {
-          console.error('Error fetching models:', modelsData.error);
-          setModels([]);
-        } else {
-          setModels(modelsData.models || []);
-        }
         setLoading(false);
       })
       .catch(err => {
@@ -316,8 +370,91 @@ export default function ActivePage() {
     }
   }, [selectedVersion]);
 
+  // Auto-scroll to bottom when new restart logs arrive
+  useEffect(() => {
+    if (restartLogsEndRef.current) {
+      restartLogsEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [restartLogs]);
+
+  // Cleanup event source on unmount
+  useEffect(() => {
+    return () => {
+      if (restartEventSourceRef.current) {
+        restartEventSourceRef.current.close();
+        restartEventSourceRef.current = null;
+      }
+    };
+  }, []);
+
+  // Check ComfyUI online status
+  useEffect(() => {
+    const checkComfyUIStatus = async () => {
+      try {
+        // Use an image request to check if ComfyUI is online
+        // This works better with CORS restrictions
+        const img = new Image();
+        const timeout = setTimeout(() => {
+          setComfyUIOnline(false);
+        }, 2000);
+        
+        img.onload = () => {
+          clearTimeout(timeout);
+          setComfyUIOnline(true);
+          // If it was restarting and now online, stop restarting state
+          setComfyUIRestarting((prev) => {
+            if (prev) {
+              return false;
+            }
+            return prev;
+          });
+        };
+        
+        img.onerror = () => {
+          clearTimeout(timeout);
+          // Try alternative: fetch with no-cors
+          fetch('http://localhost:8188', {
+            method: 'GET',
+            mode: 'no-cors',
+            cache: 'no-store'
+          }).then(() => {
+            setComfyUIOnline(true);
+            // If it was restarting and now online, stop restarting state
+            setComfyUIRestarting((prev) => {
+              if (prev) {
+                return false;
+              }
+              return prev;
+            });
+          }).catch(() => {
+            setComfyUIOnline(false);
+          });
+        };
+        
+        // Try to load a favicon or any resource from ComfyUI
+        img.src = 'http://localhost:8188/favicon.ico?' + Date.now();
+      } catch (error) {
+        setComfyUIOnline(false);
+      }
+    };
+
+    // Check immediately
+    checkComfyUIStatus();
+
+    // Check every 5 seconds
+    const interval = setInterval(checkComfyUIStatus, 5000);
+
+    return () => clearInterval(interval);
+  }, []);
+
   return (
     <>
+      <style>{`
+        @keyframes blink {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.3; }
+        }
+      `}</style>
       {/* Top Bar */}
       <Paper
         style={{
@@ -346,39 +483,66 @@ export default function ActivePage() {
               </Text>
             </Group>
             <Group gap="sm" align="center">
-              <Menu shadow="md" width={200} position="bottom-end">
-                <Menu.Target>
-              <Button
-                variant="subtle"
-                size="sm"
-                    rightSection={<RiArrowDownSLine size={14} />}
-                style={{
-                  color: '#0070f3',
-                  fontWeight: 'bold',
-                }}
-              >
-                Launch ComfyUI
-              </Button>
-                </Menu.Target>
-                <Menu.Dropdown>
-                  <Menu.Item
-                    component="a"
-                    href="http://localhost:8188"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    leftSection={<RiExternalLinkLine size={16} />}
-                  >
-                    Open ComfyUI
-                  </Menu.Item>
-                  <Menu.Item
-                    onClick={handleRestartComfyUI}
-                    leftSection={<RiRefreshLine size={16} />}
-                    disabled={!selectedVersion}
-                  >
-                    Restart ComfyUI
-                  </Menu.Item>
-                </Menu.Dropdown>
-              </Menu>
+              <Group gap={0} align="center" style={{ border: '1px solid #373a40', borderRadius: '4px', overflow: 'hidden' }}>
+                <Button
+                  variant="subtle"
+                  size="sm"
+                  component="a"
+                  href="http://localhost:8188"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  leftSection={
+                    comfyUIRestarting ? (
+                      <RiCircleFill 
+                        size={8} 
+                        color="#ffd43b" 
+                        style={{ 
+                          filter: 'drop-shadow(0 0 3px #ffd43b)',
+                          animation: 'blink 1s ease-in-out infinite'
+                        }} 
+                      />
+                    ) : comfyUIOnline ? (
+                      <RiCircleFill size={8} color="#51cf66" style={{ filter: 'drop-shadow(0 0 3px #51cf66)' }} />
+                    ) : (
+                      <RiCircleFill size={8} color="#ff6b6b" />
+                    )
+                  }
+                  rightSection={<RiExternalLinkLine size={16} />}
+                  style={{
+                    color: '#0070f3',
+                    fontWeight: 'bold',
+                    borderRadius: 0,
+                    borderRight: '1px solid #373a40',
+                  }}
+                >
+                  Launch ComfyUI
+                </Button>
+                <Menu shadow="md" width={200} position="bottom-end">
+                  <Menu.Target>
+                    <Button
+                      variant="subtle"
+                      size="sm"
+                      style={{
+                        color: '#0070f3',
+                        fontWeight: 'bold',
+                        padding: '0 8px',
+                        borderRadius: 0,
+                      }}
+                    >
+                      <RiArrowDownSLine size={14} />
+                    </Button>
+                  </Menu.Target>
+                  <Menu.Dropdown>
+                    <Menu.Item
+                      onClick={handleRestartComfyUI}
+                      leftSection={<RiRefreshLine size={16} />}
+                      disabled={!selectedVersion}
+                    >
+                      Restart ComfyUI
+                    </Menu.Item>
+                  </Menu.Dropdown>
+                </Menu>
+              </Group>
               <Button
                 variant="outline"
                 size="sm"
@@ -493,8 +657,8 @@ export default function ActivePage() {
                   <Group gap="sm" align="center">
                     <Button
                       variant="filled"
-                      size="sm"
-                      leftSection={<RiAddLine size={16} />}
+                      size="xs"
+                      leftSection={<RiAddLine size={14} />}
                       onClick={() => {
                         router.push('/install-node');
                       }}
@@ -522,98 +686,91 @@ export default function ActivePage() {
               ) : nodes.length === 0 ? (
                 <Text c="dimmed">No nodes found</Text>
               ) : (
-                <Grid gutter="sm">
+                <Stack gap="xs">
                   {nodes.map((node, index) => (
-                    <Grid.Col key={index} span={{ base: 12, sm: 6, md: 4, lg: 2 }}>
-                      <Card
-                        padding="sm"
-                        radius="md"
-                        style={{
-                          backgroundColor: '#25262b',
-                          border: node.status === 'failed' 
-                            ? '1px solid #ff6b6b' 
-                            : '1px solid #373a40',
-                          height: '100%',
-                          transition: 'transform 0.2s, box-shadow 0.2s',
-                          cursor: node.extensionPaths && node.extensionPaths.length > 0 ? 'pointer' : 'default',
-                        }}
-                        onClick={() => {
-                          if (node.extensionPaths && node.extensionPaths.length > 0) {
-                            setSelectedNode(node);
-                            setModalOpened(true);
-                          }
-                        }}
-                        onMouseEnter={(e) => {
-                          e.currentTarget.style.transform = 'translateY(-2px)';
-                          e.currentTarget.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.3)';
-                        }}
-                        onMouseLeave={(e) => {
-                          e.currentTarget.style.transform = 'translateY(0)';
-                          e.currentTarget.style.boxShadow = 'none';
-                        }}
-                      >
-                        <Stack gap="xs">
-                          <Group gap="xs" align="center" justify="space-between">
-                            <Group gap="xs" align="center" style={{ flex: 1 }}>
-                              {node.status === 'active' ? (
-                                <RiCheckboxCircleFill size={14} color="#51cf66" />
-                              ) : node.status === 'failed' ? (
-                                <RiCloseCircleFill size={14} color="#ff6b6b" />
-                              ) : (
-                                <RiCloseCircleFill size={14} color="#ff6b6b" />
-                              )}
-                              <Text size="xs" fw={500} c="gray.0" style={{ flex: 1 }}>
-                                {node.name}
-                              </Text>
-                            </Group>
-                            <Group gap="xs" onClick={(e) => e.stopPropagation()}>
-                              {node.githubUrl && (
-                                <ActionIcon
-                                  variant="subtle"
-                                  color="blue"
-                                  size="xs"
-                                  onClick={() => handleUpdate(node)}
-                                  title="Update"
-                                  style={{ color: '#4dabf7' }}
-                                >
-                                  <RiPencilLine size={12} />
-                                </ActionIcon>
-                              )}
-                              <Menu shadow="md" width={200} position="bottom-end">
-                                <Menu.Target>
-                                  <ActionIcon
-                                    variant="subtle"
-                                    color="gray"
-                                    size="xs"
-                                    title="More options"
-                                    style={{ color: '#ffffff' }}
-                                  >
-                                    <RiMoreFill size={12} />
-                                  </ActionIcon>
-                                </Menu.Target>
-                                <Menu.Dropdown>
-                                  <Menu.Item
-                                    leftSection={<RiStopCircleLine size={16} />}
-                                    onClick={() => handleDisable(node.name, node.disabled || false)}
-                                  >
-                                    {node.disabled ? 'Enable' : 'Disable'}
-                                  </Menu.Item>
-                                  <Menu.Item
-                                    leftSection={<RiDeleteBinLine size={16} />}
-                                    color="red"
-                                    onClick={() => handleDelete(node.name)}
-                                  >
-                                    Delete
-                                  </Menu.Item>
-                                </Menu.Dropdown>
-                              </Menu>
-                            </Group>
-                          </Group>
-                        </Stack>
-                      </Card>
-                    </Grid.Col>
+                    <Paper
+                      key={index}
+                      p="sm"
+                      style={{
+                        backgroundColor: '#25262b',
+                        border: node.status === 'failed' 
+                          ? '1px solid #ff6b6b' 
+                          : '1px solid #373a40',
+                        cursor: node.extensionPaths && node.extensionPaths.length > 0 ? 'pointer' : 'default',
+                        transition: 'background-color 0.2s',
+                      }}
+                      onClick={() => {
+                        if (node.extensionPaths && node.extensionPaths.length > 0) {
+                          setSelectedNode(node);
+                          setModalOpened(true);
+                        }
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.backgroundColor = '#2d2f35';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.backgroundColor = '#25262b';
+                      }}
+                    >
+                      <Group gap="xs" align="center" justify="space-between" wrap="nowrap">
+                        <Group gap="xs" align="center" style={{ flex: 1, minWidth: 0 }}>
+                          {node.status === 'active' ? (
+                            <RiCheckboxCircleFill size={16} color="#51cf66" />
+                          ) : node.status === 'failed' ? (
+                            <RiCloseCircleFill size={16} color="#ff6b6b" />
+                          ) : (
+                            <RiCloseCircleFill size={16} color="#ff6b6b" />
+                          )}
+                          <Text size="sm" fw={500} c="gray.0" style={{ flex: 1 }}>
+                            {node.name}
+                          </Text>
+                        </Group>
+                        <Group gap="xs" onClick={(e) => e.stopPropagation()}>
+                          {node.githubUrl && (
+                            <ActionIcon
+                              variant="subtle"
+                              color="blue"
+                              size="sm"
+                              onClick={() => handleUpdate(node)}
+                              title="Update"
+                              style={{ color: '#4dabf7' }}
+                            >
+                              <RiPencilLine size={16} />
+                            </ActionIcon>
+                          )}
+                          <Menu shadow="md" width={200} position="bottom-end">
+                            <Menu.Target>
+                              <ActionIcon
+                                variant="subtle"
+                                color="gray"
+                                size="sm"
+                                title="More options"
+                                style={{ color: '#ffffff' }}
+                              >
+                                <RiMoreFill size={16} />
+                              </ActionIcon>
+                            </Menu.Target>
+                            <Menu.Dropdown>
+                              <Menu.Item
+                                leftSection={<RiStopCircleLine size={16} />}
+                                onClick={() => handleDisable(node.name, node.disabled || false)}
+                              >
+                                {node.disabled ? 'Enable' : 'Disable'}
+                              </Menu.Item>
+                              <Menu.Item
+                                leftSection={<RiDeleteBinLine size={16} />}
+                                color="red"
+                                onClick={() => handleDelete(node.name)}
+                              >
+                                Delete
+                              </Menu.Item>
+                            </Menu.Dropdown>
+                          </Menu>
+                        </Group>
+                      </Group>
+                    </Paper>
                   ))}
-                </Grid>
+                </Stack>
               )}
             </div>
 
@@ -683,86 +840,6 @@ export default function ActivePage() {
                 </>
               )}
             </div>
-
-            <div style={{ marginTop: '2rem' }}>
-              <Stack gap="md" mb="md">
-                <Group justify="space-between" align="center">
-                  <Group gap="sm" align="center">
-                    <Title order={2}>Models</Title>
-                    <ActionIcon
-                      variant="subtle"
-                      size="sm"
-                      onClick={() => setModelsExpanded(!modelsExpanded)}
-                      style={{ color: '#ffffff' }}
-                      title={modelsExpanded ? 'Collapse' : 'Expand'}
-                    >
-                      {modelsExpanded ? <RiArrowUpSLine size={16} /> : <RiArrowDownSLine size={16} />}
-                    </ActionIcon>
-                  </Group>
-                  {models.length > 0 && (
-                    <Text size="sm" c="dimmed">
-                      {models.length} models
-                    </Text>
-                  )}
-                </Group>
-              </Stack>
-              {modelsExpanded && (
-                <>
-                  {loading ? (
-                    <Text c="dimmed">Loading models...</Text>
-                  ) : models.length === 0 ? (
-                    <Text c="dimmed">No models found</Text>
-                  ) : (
-                    <Grid gutter="sm">
-                      {models.map((model, index) => (
-                        <Grid.Col key={index} span={{ base: 12, sm: 6, md: 4, lg: 2 }}>
-                          <Card
-                            padding="sm"
-                            radius="md"
-                            style={{
-                              backgroundColor: '#25262b',
-                              border: '1px solid #373a40',
-                              height: '100%',
-                              transition: 'transform 0.2s, box-shadow 0.2s',
-                            }}
-                            onMouseEnter={(e) => {
-                              e.currentTarget.style.transform = 'translateY(-2px)';
-                              e.currentTarget.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.3)';
-                            }}
-                            onMouseLeave={(e) => {
-                              e.currentTarget.style.transform = 'translateY(0)';
-                              e.currentTarget.style.boxShadow = 'none';
-                            }}
-                          >
-                            <Stack gap="xs">
-                              <Text size="xs" fw={500} c="gray.0" style={{ flex: 1 }} truncate>
-                                {model.name}
-                              </Text>
-                              <Group gap="xs" justify="space-between">
-                                <Badge
-                                  size="xs"
-                                  variant="outline"
-                                  style={{
-                                    borderColor: '#a78bfa',
-                                    color: '#a78bfa',
-                                    backgroundColor: 'transparent',
-                                  }}
-                                >
-                                  {model.type}
-                                </Badge>
-                                <Text size="xs" c="#888888" style={{ fontFamily: 'monospace', fontSize: '10px' }}>
-                                  {model.formattedSize || 'N/A'}
-                                </Text>
-                              </Group>
-                            </Stack>
-                          </Card>
-                        </Grid.Col>
-                      ))}
-                    </Grid>
-                  )}
-                </>
-              )}
-            </div>
           </Stack>
         </Container>
       </div>
@@ -784,7 +861,6 @@ export default function ActivePage() {
         onClose={() => {
           setChangesModalOpened(false);
           setChangesDiff(null);
-          setNextSpaceName('');
         }}
         title="Requirements Changes"
         size="xl"
@@ -812,17 +888,6 @@ export default function ActivePage() {
                   Current: {changesDiff.current.lineCount} lines
                 </Text>
               </Group>
-              <Button
-                onClick={handleCreateSpace}
-                loading={creatingSpace}
-                disabled={creatingSpace || !changesDiff.diff || changesDiff.diff.every((item: any) => item.type === 'unchanged')}
-                style={{
-                  backgroundColor: creatingSpace || (!changesDiff.diff || changesDiff.diff.every((item: any) => item.type === 'unchanged')) ? undefined : '#0070f3',
-                  color: (creatingSpace || !changesDiff.diff || changesDiff.diff.every((item: any) => item.type === 'unchanged')) ? '#000000' : '#ffffff',
-                }}
-              >
-                Create New Space{nextSpaceName ? ` (${nextSpaceName})` : ''}
-              </Button>
             </Group>
             
             <Paper 
@@ -885,6 +950,76 @@ export default function ActivePage() {
             </Paper>
           </Stack>
         )}
+      </Modal>
+
+      <Modal
+        opened={showRestartLogs}
+        onClose={() => {
+          setShowRestartLogs(false);
+          // Don't clear logs or close event source - let restart continue in background
+          // User can reopen modal if needed
+        }}
+        title={
+          <Text fw={600} size="lg" c="#ffffff">
+            Restarting ComfyUI
+          </Text>
+        }
+        size="xl"
+        styles={{
+          title: { color: '#ffffff' },
+          content: { 
+            backgroundColor: '#1a1b1e',
+            maxHeight: '90vh',
+            display: 'flex',
+            flexDirection: 'column',
+          },
+          header: { backgroundColor: '#25262b', borderBottom: '1px solid #373a40' },
+          body: { 
+            backgroundColor: '#1a1b1e',
+            flex: 1,
+            overflow: 'hidden',
+            display: 'flex',
+            flexDirection: 'column',
+          }
+        }}
+      >
+        <Stack gap="sm" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+          <ScrollArea h={500} scrollbarSize={6}>
+            <div style={{ paddingRight: '8px', fontFamily: 'monospace', fontSize: '12px' }}>
+              {restartLogs.length === 0 ? (
+                <Text size="sm" c="dimmed" ta="center" py="xl">
+                  Waiting for logs...
+                </Text>
+              ) : (
+                <>
+                  {restartLogs.map((log, index) => (
+                    <div
+                      key={index}
+                      style={{
+                        color: '#ffffff',
+                        whiteSpace: 'pre-wrap',
+                        wordBreak: 'break-word',
+                        lineHeight: '1.5',
+                        marginBottom: '4px',
+                      }}
+                    >
+                      <span style={{ color: '#868e96', fontSize: '11px' }}>
+                        {new Date(log.timestamp).toLocaleTimeString()}{' '}
+                      </span>
+                      {renderLogMessage(log.message)}
+                    </div>
+                  ))}
+                  <div ref={restartLogsEndRef} />
+                </>
+              )}
+            </div>
+          </ScrollArea>
+          <Group justify="space-between" align="center">
+            <Text size="xs" c="#888888">
+              {restartLogs.length} log entries
+            </Text>
+          </Group>
+        </Stack>
       </Modal>
     </>
   );

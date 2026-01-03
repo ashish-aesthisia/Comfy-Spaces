@@ -4,7 +4,7 @@ import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { Container, Title, Text, Select, Button, Group, Stack, Paper, ScrollArea, Badge, Menu, ActionIcon, Modal, TextInput, Tooltip, Textarea } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
-import { RiCheckLine, RiErrorWarningLine, RiRefreshLine, RiCheckboxCircleFill, RiCloseLine, RiAddLine, RiFileCodeLine, RiGitBranchLine, RiArrowRightLine, RiMoreFill, RiPencilLine, RiDeleteBinLine, RiDownloadLine, RiInformationLine, RiCodeLine } from 'react-icons/ri';
+import { RiCheckLine, RiErrorWarningLine, RiRefreshLine, RiCheckboxCircleFill, RiCloseLine, RiAddLine, RiFileCodeLine, RiGitBranchLine, RiArrowRightLine, RiMoreFill, RiPencilLine, RiDeleteBinLine, RiDownloadLine, RiInformationLine, RiCodeLine, RiHistoryLine } from 'react-icons/ri';
 import CreateSpaceModal from './components/CreateSpaceModal';
 import ImportJsonModal from './components/ImportJsonModal';
 
@@ -49,6 +49,10 @@ export default function Home() {
   const [spaceToUpdate, setSpaceToUpdate] = useState<SpaceInfo | null>(null);
   const [requirementsContent, setRequirementsContent] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [historyModalOpened, setHistoryModalOpened] = useState(false);
+  const [spaceForHistory, setSpaceForHistory] = useState<SpaceInfo | null>(null);
+  const [historyDiff, setHistoryDiff] = useState<any>(null);
+  const [loadingHistory, setLoadingHistory] = useState(false);
 
   useEffect(() => {
     // Fetch spaces on component mount
@@ -536,6 +540,29 @@ export default function Home() {
     }
   };
 
+  const handleShowHistory = async (space: SpaceInfo) => {
+    setSpaceForHistory(space);
+    setHistoryModalOpened(true);
+    setLoadingHistory(true);
+    setHistoryDiff(null);
+    
+    try {
+      const response = await fetch(`/api/spaces/${encodeURIComponent(space.name)}/requirements/diff`);
+      const data = await response.json();
+      
+      if (!response.ok) {
+        setHistoryDiff({ error: data.error || 'Failed to load history' });
+      } else {
+        setHistoryDiff(data);
+      }
+    } catch (error) {
+      console.error('Error fetching history:', error);
+      setHistoryDiff({ error: 'Failed to load history' });
+    } finally {
+      setLoadingHistory(false);
+    }
+  };
+
   return (
     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', backgroundColor: '#000000', paddingTop: '2rem', paddingBottom: '2rem' }}>
       <Container size="xl" py="xl" style={{ width: '100%' }}>
@@ -704,6 +731,16 @@ export default function Home() {
                                   }}
                                 >
                                   Update Packages
+                                </Menu.Item>
+                                <Menu.Item
+                                  leftSection={<RiHistoryLine size={16} />}
+                                  style={{ color: '#ffffff' }}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleShowHistory(space);
+                                  }}
+                                >
+                                  History
                                 </Menu.Item>
                                 <Menu.Item
                                   leftSection={<RiPencilLine size={16} />}
@@ -1139,6 +1176,124 @@ export default function Home() {
             </Button>
           </Group>
         </Stack>
+      </Modal>
+
+      <Modal
+        opened={historyModalOpened}
+        onClose={() => {
+          setHistoryModalOpened(false);
+          setSpaceForHistory(null);
+          setHistoryDiff(null);
+        }}
+        title={
+          <Text fw={600} size="lg" c="#ffffff">
+            Requirements History - {spaceForHistory?.visibleName || spaceForHistory?.name}
+          </Text>
+        }
+        size="xl"
+        styles={{
+          title: { color: '#ffffff' },
+          content: { 
+            backgroundColor: '#1a1b1e',
+            maxHeight: '90vh',
+            display: 'flex',
+            flexDirection: 'column',
+          },
+          header: { backgroundColor: '#25262b', borderBottom: '1px solid #373a40' },
+          body: { 
+            backgroundColor: '#1a1b1e',
+            flex: 1,
+            overflow: 'hidden',
+            display: 'flex',
+            flexDirection: 'column',
+          }
+        }}
+      >
+        {loadingHistory ? (
+          <Text c="dimmed" ta="center" py="xl">Loading history...</Text>
+        ) : historyDiff?.error ? (
+          <Text c="red" ta="center" py="xl">{historyDiff.error}</Text>
+        ) : !historyDiff?.hasBackup ? (
+          <Text c="dimmed" ta="center" py="xl">No backup file found. History will be available after the first update.</Text>
+        ) : (
+          <Stack gap="md" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+            <Group justify="space-between" align="center">
+              <Group gap="md">
+                <Text size="sm" c="#888888">
+                  Backup: {historyDiff.backup.lineCount} lines
+                </Text>
+                <Text size="sm" c="#888888">
+                  Current: {historyDiff.current.lineCount} lines
+                </Text>
+              </Group>
+            </Group>
+            
+            <Paper 
+              p="sm" 
+              style={{ 
+                backgroundColor: '#0a0a0a', 
+                border: '1px solid #373a40',
+                flex: 1,
+                minHeight: 0,
+                display: 'flex',
+                flexDirection: 'column',
+              }}
+            >
+              <ScrollArea h="calc(90vh - 200px)">
+                {historyDiff.diff && historyDiff.diff.length > 0 ? (
+                  historyDiff.diff.map((item: any, idx: number) => {
+                    let bgColor = 'transparent';
+                    let borderLeft = 'none';
+                    let textColor = '#ffffff';
+                    let prefix = '  ';
+                    
+                    if (item.type === 'added') {
+                      bgColor = '#1b2d1b';
+                      borderLeft = '3px solid #51cf66';
+                      textColor = '#51cf66';
+                      prefix = '+ ';
+                    } else if (item.type === 'removed') {
+                      bgColor = '#2d1b1b';
+                      borderLeft = '3px solid #ff6b6b';
+                      textColor = '#ff6b6b';
+                      prefix = '- ';
+                    } else {
+                      textColor = '#888888';
+                      prefix = '  ';
+                    }
+                    
+                    const displayLine = item.currentLine || item.backupLine || '';
+                    
+                    return (
+                      <div
+                        key={idx}
+                        style={{
+                          padding: '2px 8px',
+                          backgroundColor: bgColor,
+                          borderLeft,
+                          marginBottom: '1px',
+                          whiteSpace: 'pre',
+                          color: textColor,
+                          fontFamily: 'monospace',
+                          fontSize: '12px',
+                          lineHeight: '1.6',
+                        }}
+                      >
+                        <span style={{ color: '#666666', marginRight: '8px' }}>
+                          {String(item.lineNumber).padStart(4, ' ')}
+                        </span>
+                        <span>{prefix}</span>
+                        <span>{displayLine || ' '}</span>
+                      </div>
+                    );
+                  })
+                ) : (
+                  <Text c="dimmed" ta="center" py="xl">No differences found</Text>
+                )}
+              </ScrollArea>
+            </Paper>
+          </Stack>
+        )}
       </Modal>
     </div>
   );

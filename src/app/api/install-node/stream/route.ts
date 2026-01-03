@@ -299,12 +299,10 @@ export async function GET(request: NextRequest) {
         const comfyProcess = spawn(pythonExec, comfyUIArgs, {
           cwd: comfyUIPath,
           env: { ...process.env },
-          shell: true,
-          detached: true,
+          shell: false,
+          detached: false,
           stdio: ['ignore', 'pipe', 'pipe'],
         });
-
-        comfyProcess.unref();
 
         // Write to log file
         const { createWriteStream } = require('fs');

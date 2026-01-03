@@ -385,7 +385,7 @@ async function checkPortInUse(port: number): Promise<boolean> {
       return stdout.trim().length > 0;
     } else {
       const { stdout } = await withTimeout(
-        execAsync(`lsof -ti:${port}`),
+        execAsync(`lsof -nP -t -iTCP:${port} -sTCP:LISTEN`),
         COMMAND_TIMEOUT,
         `Timeout checking port ${port}`
       );
@@ -452,7 +452,7 @@ async function killProcessOnPort(
       let stdout: string;
       try {
         const result = await withTimeout(
-          execAsync(`lsof -ti:${port}`),
+          execAsync(`lsof -nP -t -iTCP:${port} -sTCP:LISTEN`),
           COMMAND_TIMEOUT,
           `Timeout finding processes on port ${port}`
         );
