@@ -117,6 +117,85 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, errorMessage: st
   ]);
 }
 
+// Helper function to detect default branch (main/master) from git repository URL
+async function getDefaultBranch(cloneUrl: string): Promise<string> {
+  try {
+    // Use git ls-remote to detect the default branch
+    const { stdout } = await withTimeout(
+      execFileAsync('git', ['ls-remote', '--symref', cloneUrl, 'HEAD']),
+      10000,
+      'Timeout detecting default branch'
+    );
+    const match = stdout.match(/ref: refs\/heads\/(\S+)\s+HEAD/);
+    if (match && match[1]) {
+      return match[1];
+    }
+  } catch (error) {
+    // If ls-remote fails, try common default branches
+  }
+  
+  // Fallback: return 'main' as the most common default
+  return 'main';
+}
+
+// Helper function to checkout default branch (main/master) after clone
+async function checkoutDefaultBranch(
+  nodePath: string,
+  controller: ReadableStreamDefaultController,
+  encoder: TextEncoder,
+  logFile: string
+): Promise<void> {
+  try {
+    // Try to get current branch
+    let currentBranch: string;
+    try {
+      const { stdout } = await withTimeout(
+        execFileAsync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: nodePath }),
+        5000,
+        'Timeout getting current branch'
+      );
+      currentBranch = stdout.trim();
+    } catch (error) {
+      currentBranch = '';
+    }
+
+    // Try main first, then master
+    const defaultBranches = ['main', 'master'];
+    let checkedOut = false;
+
+    for (const branch of defaultBranches) {
+      // Skip if already on this branch
+      if (currentBranch === branch) {
+        sendLog(controller, encoder, `[APP] Already on default branch: ${branch}`, logFile);
+        checkedOut = true;
+        break;
+      }
+
+      // Try to checkout the branch
+      try {
+        await withTimeout(
+          execFileAsync('git', ['checkout', branch], { cwd: nodePath }),
+          60000,
+          'Timeout checking out branch'
+        );
+        sendLog(controller, encoder, `[APP] Checked out default branch: ${branch}`, logFile);
+        checkedOut = true;
+        break;
+      } catch (error) {
+        // Branch doesn't exist, try next one
+        continue;
+      }
+    }
+
+    if (!checkedOut) {
+      // If neither main nor master exists, stay on current branch
+      sendLog(controller, encoder, `[WARN] Could not find main or master branch, staying on current branch: ${currentBranch}`, logFile);
+    }
+  } catch (error: any) {
+    sendLog(controller, encoder, `[WARN] Error checking out default branch: ${error.message}`, logFile);
+  }
+}
+
 function sendLog(controller: ReadableStreamDefaultController, encoder: TextEncoder, message: string, logFile?: string) {
   const timestamp = new Date().toISOString();
   const logEntry = { message, timestamp };
@@ -704,13 +783,21 @@ async function cloneCustomNodes(
           cloneUrl = cloneUrl.endsWith('/') ? `${cloneUrl}.git` : `${cloneUrl}.git`;
         }
 
+        // If no branch specified, detect and use default branch
+        let branchToUse = branch;
+        if (!branchToUse) {
+          sendLog(controller, encoder, `[APP] No branch specified for ${nodeName}, detecting default branch...`, logFile);
+          branchToUse = await getDefaultBranch(cloneUrl);
+          sendLog(controller, encoder, `[APP] Using default branch: ${branchToUse}`, logFile);
+        }
+
         if (commitId) {
           // If we have a specific commit, clone without depth limit to ensure the commit is available
-          if (branch) {
-            // Clone specific branch (full history needed for specific commit)
-            sendLog(controller, encoder, `[APP] Cloning branch ${branch} (full history for commit ${commitId.substring(0, 7)})...`, logFile);
+          if (branchToUse) {
+            // Clone specific branch or default branch (full history needed for specific commit)
+            sendLog(controller, encoder, `[APP] Cloning branch ${branchToUse} (full history for commit ${commitId.substring(0, 7)})...`, logFile);
             await withTimeout(
-              execFileAsync('git', ['clone', '--branch', branch, cloneUrl, nodePath]),
+              execFileAsync('git', ['clone', '--branch', branchToUse, cloneUrl, nodePath]),
               300000, // 5 minutes timeout
               `Timeout cloning ${nodeName}`
             );
@@ -731,14 +818,17 @@ async function cloneCustomNodes(
             60000, // 1 minute timeout
             `Timeout checking out commit for ${nodeName}`
           );
-        } else if (branch) {
-          // Clone specific branch (shallow clone is fine if no specific commit)
-          sendLog(controller, encoder, `[APP] Cloning branch ${branch}...`, logFile);
+        } else if (branchToUse) {
+          // Clone specific branch or default branch (shallow clone is fine if no specific commit)
+          sendLog(controller, encoder, `[APP] Cloning branch ${branchToUse}...`, logFile);
           await withTimeout(
-            execFileAsync('git', ['clone', '--branch', branch, '--depth', '1', cloneUrl, nodePath]),
+            execFileAsync('git', ['clone', '--branch', branchToUse, '--depth', '1', cloneUrl, nodePath]),
             300000, // 5 minutes timeout
             `Timeout cloning ${nodeName}`
           );
+          
+          // Always checkout default branch (main/master) after clone
+          await checkoutDefaultBranch(nodePath, controller, encoder, logFile);
         } else {
           // Clone default branch (shallow clone is fine if no specific commit)
           sendLog(controller, encoder, `[APP] Cloning default branch...`, logFile);
@@ -747,6 +837,9 @@ async function cloneCustomNodes(
             300000,
             `Timeout cloning ${nodeName}`
           );
+          
+          // Always checkout default branch (main/master) after clone
+          await checkoutDefaultBranch(nodePath, controller, encoder, logFile);
         }
 
         sendLog(controller, encoder, `[APP] Node ${nodeName} cloned successfully`, logFile);

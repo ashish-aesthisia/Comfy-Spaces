@@ -7,6 +7,57 @@ import { execFile } from 'child_process';
 
 const execFileAsync = promisify(execFile);
 
+// Helper function to detect default branch (main/master) from git repository URL
+async function getDefaultBranch(cloneUrl: string): Promise<string> {
+  try {
+    // Use git ls-remote to detect the default branch
+    const { stdout } = await execFileAsync('git', ['ls-remote', '--symref', cloneUrl, 'HEAD']);
+    const match = stdout.match(/ref: refs\/heads\/(\S+)\s+HEAD/);
+    if (match && match[1]) {
+      return match[1];
+    }
+  } catch (error) {
+    // If ls-remote fails, try common default branches
+  }
+  
+  // Fallback: return 'main' as the most common default
+  return 'main';
+}
+
+// Helper function to checkout default branch (main/master) after clone
+async function checkoutDefaultBranch(nodePath: string): Promise<void> {
+  try {
+    // Try to get current branch
+    let currentBranch: string;
+    try {
+      const { stdout } = await execFileAsync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: nodePath });
+      currentBranch = stdout.trim();
+    } catch (error) {
+      currentBranch = '';
+    }
+
+    // Try main first, then master
+    const defaultBranches = ['main', 'master'];
+    for (const branch of defaultBranches) {
+      // Skip if already on this branch
+      if (currentBranch === branch) {
+        return;
+      }
+
+      // Try to checkout the branch
+      try {
+        await execFileAsync('git', ['checkout', branch], { cwd: nodePath });
+        return;
+      } catch (error) {
+        // Branch doesn't exist, try next one
+        continue;
+      }
+    }
+  } catch (error) {
+    // Silently fail - if we can't checkout default branch, continue
+  }
+}
+
 export async function POST(request: Request) {
   try {
     const { githubUrl, commitId, branch } = await request.json();
@@ -64,17 +115,26 @@ export async function POST(request: Request) {
         cloneUrl = cloneUrl.endsWith('/') ? `${cloneUrl}.git` : `${cloneUrl}.git`;
       }
 
-      if (branch) {
-        // Clone specific branch
-        await execFileAsync('git', ['clone', '--branch', branch, '--depth', '1', cloneUrl, nodePath]);
+      // If no branch specified, detect and use default branch
+      let branchToUse = branch;
+      if (!branchToUse) {
+        branchToUse = await getDefaultBranch(cloneUrl);
+      }
+
+      if (branchToUse) {
+        // Clone specific branch or default branch
+        await execFileAsync('git', ['clone', '--branch', branchToUse, '--depth', '1', cloneUrl, nodePath]);
       } else {
-        // Clone default branch
+        // Clone default branch (fallback)
         await execFileAsync('git', ['clone', '--depth', '1', cloneUrl, nodePath]);
       }
 
-      // Checkout specific commit if provided (and not using branch)
+      // Checkout specific commit if provided (and not using a specific branch)
       if (commitId && !branch) {
         await execFileAsync('git', ['checkout', commitId], { cwd: nodePath });
+      } else if (!commitId) {
+        // Always checkout default branch (main/master) after clone if no specific commit
+        await checkoutDefaultBranch(nodePath);
       }
     } catch (error: any) {
       // Clean up on error

@@ -94,6 +94,75 @@ async function ensurePip(
   }
 }
 
+// Helper function to detect default branch (main/master) from git repository URL
+async function getDefaultBranch(cloneUrl: string): Promise<string> {
+  try {
+    // Use git ls-remote to detect the default branch
+    const { stdout } = await execFileAsync('git', ['ls-remote', '--symref', cloneUrl, 'HEAD']);
+    const match = stdout.match(/ref: refs\/heads\/(\S+)\s+HEAD/);
+    if (match && match[1]) {
+      return match[1];
+    }
+  } catch (error) {
+    // If ls-remote fails, try common default branches
+  }
+  
+  // Fallback: try to detect from cloned repo or use common defaults
+  // For now, return 'main' as the most common default
+  // If main doesn't exist, we'll try master next
+  return 'main';
+}
+
+// Helper function to checkout default branch (main/master) after clone
+async function checkoutDefaultBranch(
+  nodePath: string,
+  controller: ReadableStreamDefaultController,
+  encoder: TextEncoder,
+  logFile: string
+): Promise<void> {
+  try {
+    // Try to get current branch
+    let currentBranch: string;
+    try {
+      const { stdout } = await execFileAsync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: nodePath });
+      currentBranch = stdout.trim();
+    } catch (error) {
+      currentBranch = '';
+    }
+
+    // Try main first, then master
+    const defaultBranches = ['main', 'master'];
+    let checkedOut = false;
+
+    for (const branch of defaultBranches) {
+      // Skip if already on this branch
+      if (currentBranch === branch) {
+        sendLog(controller, encoder, `[APP] Already on default branch: ${branch}`, logFile);
+        checkedOut = true;
+        break;
+      }
+
+      // Try to checkout the branch
+      try {
+        await execFileAsync('git', ['checkout', branch], { cwd: nodePath });
+        sendLog(controller, encoder, `[APP] Checked out default branch: ${branch}`, logFile);
+        checkedOut = true;
+        break;
+      } catch (error) {
+        // Branch doesn't exist, try next one
+        continue;
+      }
+    }
+
+    if (!checkedOut) {
+      // If neither main nor master exists, stay on current branch
+      sendLog(controller, encoder, `[WARN] Could not find main or master branch, staying on current branch: ${currentBranch}`, logFile);
+    }
+  } catch (error: any) {
+    sendLog(controller, encoder, `[WARN] Error checking out default branch: ${error.message}`, logFile);
+  }
+}
+
 export async function GET(request: NextRequest) {
   const encoder = new TextEncoder();
   const searchParams = request.nextUrl.searchParams;
@@ -195,7 +264,10 @@ export async function GET(request: NextRequest) {
               return;
             }
           } else {
-            // No commit or branch specified, pull current branch
+            // No commit or branch specified, checkout default branch (main/master) and pull
+            sendLog(controller, encoder, `[APP] No branch specified, checking out default branch...`, logFilePath);
+            await checkoutDefaultBranch(nodePath, controller, encoder, logFilePath);
+            
             sendLog(controller, encoder, `[APP] Pulling latest changes...`, logFilePath);
             try {
               await execFileAsync('git', ['pull'], { cwd: nodePath });
@@ -218,14 +290,26 @@ export async function GET(request: NextRequest) {
               cloneUrl = cloneUrl.endsWith('/') ? `${cloneUrl}.git` : `${cloneUrl}.git`;
             }
 
-            if (branch) {
-              await execFileAsync('git', ['clone', '--branch', branch, '--depth', '1', cloneUrl, nodePath]);
+            // If no branch specified, detect and use default branch
+            let branchToUse = branch;
+            if (!branchToUse) {
+              sendLog(controller, encoder, `[APP] No branch specified, detecting default branch...`, logFilePath);
+              branchToUse = await getDefaultBranch(cloneUrl);
+              sendLog(controller, encoder, `[APP] Using default branch: ${branchToUse}`, logFilePath);
+            }
+
+            if (branchToUse) {
+              await execFileAsync('git', ['clone', '--branch', branchToUse, '--depth', '1', cloneUrl, nodePath]);
             } else {
               await execFileAsync('git', ['clone', '--depth', '1', cloneUrl, nodePath]);
             }
 
             if (commitId && !branch) {
+              // Checkout specific commit if provided (and not using a specific branch)
               await execFileAsync('git', ['checkout', commitId], { cwd: nodePath });
+            } else if (!commitId) {
+              // Always checkout default branch (main/master) after clone if no specific commit
+              await checkoutDefaultBranch(nodePath, controller, encoder, logFilePath);
             }
 
             sendLog(controller, encoder, `[APP] Repository cloned successfully`, logFilePath);
