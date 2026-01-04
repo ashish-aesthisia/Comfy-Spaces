@@ -1493,6 +1493,11 @@ export async function GET(request: NextRequest) {
           sendLog(controller, encoder, `[APP] Using custom ComfyUI launch command from environment`, logFilePath);
         }
         
+        // Always add --host=0.0.0.0 to allow external access
+        if (!comfyUIArgs.includes('--host')) {
+          comfyUIArgs.push('--host', '0.0.0.0');
+        }
+        
         // Always use the space directory's comfy-logs.txt
         const comfyLogFile = comfyLogFilePath;
         

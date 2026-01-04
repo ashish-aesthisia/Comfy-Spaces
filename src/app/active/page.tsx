@@ -465,6 +465,10 @@ export default function ActivePage() {
   useEffect(() => {
     const checkComfyUIStatus = async () => {
       try {
+        // Get the current hostname from the browser window
+        const hostname = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
+        const comfyUIUrl = `http://${hostname}:8188`;
+        
         // Use an image request to check if ComfyUI is online
         // This works better with CORS restrictions
         const img = new Image();
@@ -487,7 +491,7 @@ export default function ActivePage() {
         img.onerror = () => {
           clearTimeout(timeout);
           // Try alternative: fetch with no-cors
-          fetch('http://localhost:8188', {
+          fetch(comfyUIUrl, {
             method: 'GET',
             mode: 'no-cors',
             cache: 'no-store'
@@ -506,7 +510,7 @@ export default function ActivePage() {
         };
         
         // Try to load a favicon or any resource from ComfyUI
-        img.src = 'http://localhost:8188/favicon.ico?' + Date.now();
+        img.src = `${comfyUIUrl}/favicon.ico?` + Date.now();
       } catch (error) {
         setComfyUIOnline(false);
       }
@@ -566,7 +570,7 @@ export default function ActivePage() {
                   variant="subtle"
                   size="sm"
                   component="a"
-                  href="http://localhost:8188"
+                  href={typeof window !== 'undefined' ? `http://${window.location.hostname}:8188` : 'http://localhost:8188'}
                   target="_blank"
                   rel="noopener noreferrer"
                   leftSection={
