@@ -24,6 +24,8 @@ npm run dev
 
 ```
 
+ComfyUI Installation Path: /spaces/space-id/ComfyUI
+
 ## Requirements
 
 - Node.js 18+ 
