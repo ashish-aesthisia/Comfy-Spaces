@@ -1494,8 +1494,8 @@ export async function GET(request: NextRequest) {
         }
         
         // Always add --host=0.0.0.0 to allow external access
-        if (!comfyUIArgs.includes('--host')) {
-          comfyUIArgs.push('--host', '0.0.0.0');
+        if (!comfyUIArgs.includes('--listen')) {
+          comfyUIArgs.push('--listen', '0.0.0.0');
         }
         
         // Always use the space directory's comfy-logs.txt
