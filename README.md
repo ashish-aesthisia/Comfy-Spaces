@@ -2,6 +2,9 @@
 
 A web-based manager for multiple ComfyUI workspaces with dependency tracking and custom node installation.
 
+![Screenshot](https://github.com/ashish-aesthisia/Comfy-Spaces/blob/main/screenshot/image.png?raw=true)
+
+
 ## Features
 
 - **Multiple Workspaces**: Create and manage isolated ComfyUI spaces
