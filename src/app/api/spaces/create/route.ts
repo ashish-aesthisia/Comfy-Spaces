@@ -3,9 +3,13 @@ import { join } from 'path';
 import { readFile, writeFile, mkdir, readdir, cp } from 'fs/promises';
 import { existsSync } from 'fs';
 import { spawn } from 'child_process';
+import { ensureSpacesDir } from '../../utils/ensureSpacesDir';
 
 export async function POST() {
   try {
+    // Ensure spaces directory exists
+    await ensureSpacesDir();
+    
     const spacesPath = join(process.cwd(), 'spaces');
     const selectedVersionPath = join(spacesPath, 'selected_version.txt');
     

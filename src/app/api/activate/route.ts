@@ -3,9 +3,13 @@ import { writeFile, mkdir } from 'fs/promises';
 import { join } from 'path';
 import { spawn } from 'child_process';
 import { existsSync } from 'fs';
+import { ensureSpacesDir } from '../utils/ensureSpacesDir';
 
 export async function POST(request: Request) {
   try {
+    // Ensure spaces directory exists
+    await ensureSpacesDir();
+    
     const { version } = await request.json();
     
     if (!version) {

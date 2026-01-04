@@ -636,7 +636,19 @@ export default function Home() {
       <Container size="xl" py="xl" style={{ width: '100%' }}>
         <Stack gap="md">
           <div style={{ textAlign: 'left', width: '50%', margin: '0 auto' }}>
-            <Title order={2} mb="xs" c="#ffffff">Comfy Spaces</Title>
+            <Group gap="xs" align="center" mb="xs">
+              <Title order={2} c="#ffffff">Comfy Spaces</Title>
+              <Badge
+                size="sm"
+                variant="filled"
+                style={{
+                  backgroundColor: '#0070f3',
+                  color: '#ffffff',
+                }}
+              >
+                Beta
+              </Badge>
+            </Group>
             <Group gap="xs" mt="md">
               <Paper
                 p="sm"

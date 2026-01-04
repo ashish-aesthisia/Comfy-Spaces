@@ -41,7 +41,7 @@ const theme = createTheme({
 });
 
 export const metadata: Metadata = {
-  title: "Comfy Spaces",
+  title: "Comfy Spaces (Beta)",
   description: "Manage and activate custom node revisions",
 };
 

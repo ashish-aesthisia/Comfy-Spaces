@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { readdir, readFile, stat } from 'fs/promises';
 import { join } from 'path';
 import { existsSync } from 'fs';
+import { ensureSpacesDir } from '../utils/ensureSpacesDir';
 
 interface SpaceInfo {
   name: string; // spaceId (directory name)
@@ -14,6 +15,9 @@ interface SpaceInfo {
 
 export async function GET() {
   try {
+    // Ensure spaces directory exists
+    await ensureSpacesDir();
+    
     const spacesPath = join(process.cwd(), 'spaces');
     const entries = await readdir(spacesPath, { withFileTypes: true });
     
