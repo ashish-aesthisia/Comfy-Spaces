@@ -1,11 +1,11 @@
 import { NextResponse } from 'next/server';
 import { promisify } from 'util';
-import { exec } from 'child_process';
+import { execFile } from 'child_process';
 import { join } from 'path';
-import { mkdir, writeFile, readFile } from 'fs/promises';
+import { mkdir, writeFile, readFile, rm } from 'fs/promises';
 import { existsSync } from 'fs';
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 type DependencyStatus = 'installed' | 'upgrade' | 'downgrade' | 'new';
 
@@ -462,39 +462,39 @@ async function fetchRequirementsFromGit(githubUrl: string, commitId?: string, br
     
     // Shallow clone as last resort
     if (branch) {
-      await execAsync(`git clone --branch ${branch} --depth 1 ${cloneUrl} ${tempRepoPath}`, {
+      await execFileAsync('git', ['clone', '--branch', branch, '--depth', '1', cloneUrl, tempRepoPath], {
         timeout: 30000,
       });
     } else {
-      await execAsync(`git clone --depth 1 ${cloneUrl} ${tempRepoPath}`, {
+      await execFileAsync('git', ['clone', '--depth', '1', cloneUrl, tempRepoPath], {
         timeout: 30000,
       });
     }
     
     // Checkout specific commit if provided
     if (commitId && !branch) {
-      await execAsync(`git checkout ${commitId}`, { cwd: tempRepoPath });
+      await execFileAsync('git', ['checkout', commitId], { cwd: tempRepoPath });
     }
     
     // Read requirements.txt
     const requirementsPath = join(tempRepoPath, 'requirements.txt');
     if (!existsSync(requirementsPath)) {
       // Cleanup and return null if requirements.txt doesn't exist
-      await execAsync(`rm -rf ${tempRepoPath}`);
+      await rm(tempRepoPath, { recursive: true, force: true });
       return null;
     }
     
     const content = await readFile(requirementsPath, 'utf-8');
     
     // Cleanup
-    await execAsync(`rm -rf ${tempRepoPath}`);
+    await rm(tempRepoPath, { recursive: true, force: true });
     
     return content;
   } catch (error: any) {
     // Cleanup on error
     try {
       if (existsSync(tempRepoPath)) {
-        await execAsync(`rm -rf ${tempRepoPath}`);
+        await rm(tempRepoPath, { recursive: true, force: true });
       }
     } catch {}
     
@@ -532,7 +532,7 @@ export async function POST(request: Request) {
     // Determine Python executable - use venv Python from selected space if available
     const isWindows = process.platform === 'win32';
     const venvPath = join(spacesPath, selectedVersion, 'venv');
-    let pythonExec = 'python3';
+    let pythonExec = isWindows ? 'python' : 'python3';
     
     if (existsSync(venvPath)) {
       pythonExec = isWindows
@@ -600,8 +600,9 @@ export async function POST(request: Request) {
         const depName = dep.split(/[=<>!~]/)[0].trim();
         
         // Run pip install --dry-run
-        const { stdout, stderr } = await execAsync(
-          `${pythonExec} -m pip install --dry-run ${dep}`,
+        const { stdout, stderr } = await execFileAsync(
+          pythonExec,
+          ['-m', 'pip', 'install', '--dry-run', dep],
           {
             timeout: 30000,
             env: { ...process.env },
@@ -671,4 +672,3 @@ export async function POST(request: Request) {
     );
   }
 }
-

@@ -1,11 +1,12 @@
 import { NextRequest } from 'next/server';
 import { join } from 'path';
-import { spawn, exec } from 'child_process';
+import { spawn, exec, execFile } from 'child_process';
 import { existsSync, appendFileSync, mkdirSync, writeFileSync, createWriteStream, readFileSync, statSync } from 'fs';
 import { readdir, readFile, writeFile, mkdir } from 'fs/promises';
 import { promisify } from 'util';
 
 const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 // Helper function to check if requirements have changed
 async function hasRequirementsChanged(
@@ -150,7 +151,7 @@ function runCommand(
     const childProcess = spawn(command, args, {
       cwd,
       env: { ...process.env, ...env },
-      shell: true,
+      shell: false,
     });
 
     childProcess.stdout?.on('data', (data) => {
@@ -184,7 +185,7 @@ function getVersion(
     const childProcess = spawn(command, args, {
       cwd,
       env: { ...process.env, ...env },
-      shell: true,
+      shell: false,
     });
 
     let output = '';
@@ -212,6 +213,42 @@ function getVersion(
   });
 }
 
+function splitCommandArgs(command: string): string[] {
+  const args: string[] = [];
+  let current = '';
+  let inSingle = false;
+  let inDouble = false;
+
+  for (const char of command.trim()) {
+    if (char === "'" && !inDouble) {
+      inSingle = !inSingle;
+      continue;
+    }
+    if (char === '"' && !inSingle) {
+      inDouble = !inDouble;
+      continue;
+    }
+    if (/\s/.test(char) && !inSingle && !inDouble) {
+      if (current) {
+        args.push(current);
+        current = '';
+      }
+      continue;
+    }
+    current += char;
+  }
+
+  if (current) {
+    args.push(current);
+  }
+
+  return args;
+}
+
+function isPythonCommand(commandPart: string): boolean {
+  return /(^|[\\/])python(?:\d+)?(?:\.exe)?$/i.test(commandPart.trim());
+}
+
 async function updateRequirementsTxt(
   pipExec: string,
   spacePath: string,
@@ -225,7 +262,7 @@ async function updateRequirementsTxt(
     const pipListProcess = spawn(pipExec, ['list', '--format=freeze'], {
       cwd: spacePath,
       env: { ...process.env },
-      shell: true,
+      shell: false,
     });
 
     let pipListOutput = '';
@@ -308,7 +345,7 @@ async function createRequirementsBkpIfMissing(
     const pipListProcess = spawn(pipExec, ['list', '--format=freeze'], {
       cwd: spacePath,
       env: { ...process.env },
-      shell: true,
+      shell: false,
     });
 
     let pipListOutput = '';
@@ -354,7 +391,7 @@ async function getGitBranchAndCommit(nodePath: string): Promise<{ branch: string
     let branch: string | null = null;
     try {
       const { stdout: branchOutput } = await withTimeout(
-        execAsync('git rev-parse --abbrev-ref HEAD', { cwd: nodePath }),
+        execFileAsync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: nodePath }),
         5000,
         'Timeout getting git branch'
       );
@@ -367,7 +404,7 @@ async function getGitBranchAndCommit(nodePath: string): Promise<{ branch: string
     let commitId: string | null = null;
     try {
       const { stdout: commitOutput } = await withTimeout(
-        execAsync('git rev-parse HEAD', { cwd: nodePath }),
+        execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: nodePath }),
         5000,
         'Timeout getting git commit'
       );
@@ -508,7 +545,7 @@ async function cloneComfyUI(
         // Clone specific release tag
         sendLog(controller, encoder, `[APP] Cloning release tag: ${releaseTag}`, logFile);
         await withTimeout(
-          execAsync(`git clone --branch ${releaseTag} --depth 1 ${cloneUrl} ${comfyUIPath}`),
+          execFileAsync('git', ['clone', '--branch', releaseTag, '--depth', '1', cloneUrl, comfyUIPath]),
           300000, // 5 minutes timeout
           'Timeout cloning ComfyUI repository'
         );
@@ -518,7 +555,7 @@ async function cloneComfyUI(
           // Clone specific branch (full history needed for specific commit)
           sendLog(controller, encoder, `[APP] Cloning branch ${branch} (full history for commit ${commitId.substring(0, 7)})...`, logFile);
           await withTimeout(
-            execAsync(`git clone --branch ${branch} ${cloneUrl} ${comfyUIPath}`),
+            execFileAsync('git', ['clone', '--branch', branch, cloneUrl, comfyUIPath]),
             300000,
             'Timeout cloning ComfyUI repository'
           );
@@ -526,7 +563,7 @@ async function cloneComfyUI(
           // Clone default branch (full history needed for specific commit)
           sendLog(controller, encoder, `[APP] Cloning default branch (full history for commit ${commitId.substring(0, 7)})...`, logFile);
           await withTimeout(
-            execAsync(`git clone ${cloneUrl} ${comfyUIPath}`),
+            execFileAsync('git', ['clone', cloneUrl, comfyUIPath]),
             300000,
             'Timeout cloning ComfyUI repository'
           );
@@ -535,7 +572,7 @@ async function cloneComfyUI(
         // Checkout specific commit
         sendLog(controller, encoder, `[APP] Checking out commit: ${commitId.substring(0, 7)}`, logFile);
         await withTimeout(
-          execAsync(`git checkout ${commitId}`, { cwd: comfyUIPath }),
+          execFileAsync('git', ['checkout', commitId], { cwd: comfyUIPath }),
           60000, // 1 minute timeout
           'Timeout checking out commit'
         );
@@ -543,7 +580,7 @@ async function cloneComfyUI(
         // Clone specific branch (shallow clone is fine if no specific commit)
         sendLog(controller, encoder, `[APP] Cloning branch: ${branch}`, logFile);
         await withTimeout(
-          execAsync(`git clone --branch ${branch} --depth 1 ${cloneUrl} ${comfyUIPath}`),
+          execFileAsync('git', ['clone', '--branch', branch, '--depth', '1', cloneUrl, comfyUIPath]),
           300000,
           'Timeout cloning ComfyUI repository'
         );
@@ -551,7 +588,7 @@ async function cloneComfyUI(
         // Clone default branch (shallow clone is fine if no specific commit)
         sendLog(controller, encoder, `[APP] Cloning default branch`, logFile);
         await withTimeout(
-          execAsync(`git clone --depth 1 ${cloneUrl} ${comfyUIPath}`),
+          execFileAsync('git', ['clone', '--depth', '1', cloneUrl, comfyUIPath]),
           300000,
           'Timeout cloning ComfyUI repository'
         );
@@ -638,7 +675,7 @@ async function cloneCustomNodes(
             // Clone specific branch (full history needed for specific commit)
             sendLog(controller, encoder, `[APP] Cloning branch ${branch} (full history for commit ${commitId.substring(0, 7)})...`, logFile);
             await withTimeout(
-              execAsync(`git clone --branch ${branch} ${cloneUrl} ${nodePath}`),
+              execFileAsync('git', ['clone', '--branch', branch, cloneUrl, nodePath]),
               300000, // 5 minutes timeout
               `Timeout cloning ${nodeName}`
             );
@@ -646,7 +683,7 @@ async function cloneCustomNodes(
             // Clone default branch (full history needed for specific commit)
             sendLog(controller, encoder, `[APP] Cloning default branch (full history for commit ${commitId.substring(0, 7)})...`, logFile);
             await withTimeout(
-              execAsync(`git clone ${cloneUrl} ${nodePath}`),
+              execFileAsync('git', ['clone', cloneUrl, nodePath]),
               300000,
               `Timeout cloning ${nodeName}`
             );
@@ -655,7 +692,7 @@ async function cloneCustomNodes(
           // Checkout specific commit
           sendLog(controller, encoder, `[APP] Checking out commit ${commitId.substring(0, 7)} for ${nodeName}`, logFile);
           await withTimeout(
-            execAsync(`git checkout ${commitId}`, { cwd: nodePath }),
+            execFileAsync('git', ['checkout', commitId], { cwd: nodePath }),
             60000, // 1 minute timeout
             `Timeout checking out commit for ${nodeName}`
           );
@@ -663,7 +700,7 @@ async function cloneCustomNodes(
           // Clone specific branch (shallow clone is fine if no specific commit)
           sendLog(controller, encoder, `[APP] Cloning branch ${branch}...`, logFile);
           await withTimeout(
-            execAsync(`git clone --branch ${branch} --depth 1 ${cloneUrl} ${nodePath}`),
+            execFileAsync('git', ['clone', '--branch', branch, '--depth', '1', cloneUrl, nodePath]),
             300000, // 5 minutes timeout
             `Timeout cloning ${nodeName}`
           );
@@ -671,7 +708,7 @@ async function cloneCustomNodes(
           // Clone default branch (shallow clone is fine if no specific commit)
           sendLog(controller, encoder, `[APP] Cloning default branch...`, logFile);
           await withTimeout(
-            execAsync(`git clone --depth 1 ${cloneUrl} ${nodePath}`),
+            execFileAsync('git', ['clone', '--depth', '1', cloneUrl, nodePath]),
             300000,
             `Timeout cloning ${nodeName}`
           );
@@ -897,6 +934,7 @@ export async function GET(request: NextRequest) {
       });
 
       try {
+        const isWindows = process.platform === 'win32';
         // Step 0: Check and kill existing ComfyUI process on port 8188
         const COMFYUI_PORT = 8188;
         sendLog(controller, encoder, `[APP] Checking if port ${COMFYUI_PORT} is in use...`, logFilePath);
@@ -927,10 +965,11 @@ export async function GET(request: NextRequest) {
           sendLog(controller, encoder, `[APP] Virtual environment not found. Creating venv...`, logFilePath);
           
           // Create venv with process tracking
-          const venvProcess = spawn('python3', ['-m', 'venv', venvPath], {
+          const venvPython = isWindows ? 'python' : 'python3';
+          const venvProcess = spawn(venvPython, ['-m', 'venv', venvPath], {
             cwd: spacePath,
             env: { ...process.env },
-            shell: true,
+            shell: false,
           });
 
           const venvProcessKill = () => {
@@ -984,7 +1023,6 @@ export async function GET(request: NextRequest) {
         }
 
         // Determine the python executable path based on OS
-        const isWindows = process.platform === 'win32';
         const pythonExec = isWindows 
           ? join(venvPath, 'Scripts', 'python.exe')
           : join(venvPath, 'bin', 'python3');
@@ -1037,7 +1075,7 @@ export async function GET(request: NextRequest) {
               const pipProcess = spawn(pipExec, ['install', '-r', requirementsPath, '--upgrade-strategy', 'only-if-needed'], {
                 cwd: spacePath,
                 env: { ...process.env },
-                shell: true,
+                shell: false,
               });
 
               const pipProcessKill = () => {
@@ -1117,7 +1155,7 @@ export async function GET(request: NextRequest) {
                 const retryPipProcess = spawn(pipExec, ['install', '-r', requirementsPath, '--upgrade-strategy', 'only-if-needed'], {
                   cwd: spacePath,
                   env: { ...process.env },
-                  shell: true,
+                  shell: false,
                 });
 
                 const retryPipProcessKill = () => {
@@ -1288,7 +1326,7 @@ export async function GET(request: NextRequest) {
         if (comfyCmd) {
           // Parse the command - handle shell redirection like "> ./data/comfy-logs.txt"
           // Note: We ignore log file redirections and always use space/comfy-logs.txt
-          const parts = comfyCmd.trim().split(/\s+/);
+          const parts = splitCommandArgs(comfyCmd);
           const args: string[] = [];
           
           for (let i = 0; i < parts.length; i++) {
@@ -1301,9 +1339,9 @@ export async function GET(request: NextRequest) {
             } else if (part.startsWith('>')) {
               // Redirection without space: ">file.txt", skip it
               continue;
-            } else if (part === 'python3' || part === 'python') {
+            } else if (isPythonCommand(part)) {
               // If using system python, note it but we'll still use venv python
-              useSystemPython = (part === 'python3');
+              useSystemPython = /python3/i.test(part);
               // Skip 'python3' - we'll use pythonExec instead
               continue;
             } else {
@@ -1341,7 +1379,7 @@ export async function GET(request: NextRequest) {
           {
             cwd: comfyUIPath,
             env: comfyEnv,
-            shell: true,
+            shell: false,
             detached: true, // Run in detached mode so it continues after parent exits
             stdio: ['ignore', 'pipe', 'pipe'], // Keep stdout/stderr for logging
           }
@@ -1457,4 +1495,3 @@ export async function GET(request: NextRequest) {
     },
   });
 }
-
