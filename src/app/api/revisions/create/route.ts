@@ -58,11 +58,12 @@ export async function POST() {
 
     // Create venv in new revision
     const venvPath = join(nextVersionPath, 'venv');
+    const pythonCmd = process.platform === 'win32' ? 'python' : 'python3';
     await new Promise<void>((resolve, reject) => {
-      const venvProcess = spawn('python3', ['-m', 'venv', venvPath], {
+      const venvProcess = spawn(pythonCmd, ['-m', 'venv', venvPath], {
         cwd: nextVersionPath,
         env: { ...process.env },
-        shell: true,
+        shell: false,
       });
 
       venvProcess.on('close', (code) => {
@@ -100,4 +101,3 @@ export async function POST() {
     );
   }
 }
-

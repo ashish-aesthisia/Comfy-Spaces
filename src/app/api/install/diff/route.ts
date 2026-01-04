@@ -276,7 +276,7 @@ export async function GET(request: NextRequest) {
       // Determine Python executable - use venv Python from selected space if available
       const isWindows = process.platform === 'win32';
       const venvPath = join(spacesPath, selectedVersion, 'venv');
-      let pythonExec = 'python3';
+      let pythonExec = isWindows ? 'python' : 'python3';
       
       if (existsSync(venvPath)) {
         pythonExec = isWindows
@@ -288,7 +288,7 @@ export async function GET(request: NextRequest) {
         // Use python -m pip_tools.compile (pip-tools is the package name)
         const pythonProcess = spawn(pythonExec, ['-m', 'pip_tools.compile', '--dry-run', tempMergedPath], {
           env: { ...process.env },
-          shell: true,
+          shell: false,
           cwd: process.cwd(),
         });
         
@@ -373,4 +373,3 @@ export async function GET(request: NextRequest) {
     );
   }
 }
-

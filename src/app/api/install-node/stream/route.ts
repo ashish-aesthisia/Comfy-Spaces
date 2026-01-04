@@ -1,12 +1,10 @@
 import { NextRequest } from 'next/server';
 import { join } from 'path';
-import { spawn } from 'child_process';
+import { spawn, execFile } from 'child_process';
 import { existsSync, appendFileSync, mkdirSync, writeFileSync, readFileSync } from 'fs';
 import { readFile, writeFile, mkdir } from 'fs/promises';
 import { promisify } from 'util';
-import { exec } from 'child_process';
-
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 // Helper function to save requirements history snapshot
 async function saveRequirementsHistory(
@@ -64,6 +62,35 @@ function sendLog(controller: ReadableStreamDefaultController, encoder: TextEncod
     } catch (error) {
       console.error('Error writing to log file:', error);
     }
+  }
+}
+
+type PipCommand = { command: string; args: string[]; display: string };
+
+function resolvePipCommand(pythonExec: string, venvPath: string): PipCommand {
+  const isWindows = process.platform === 'win32';
+  const pipPath = isWindows
+    ? join(venvPath, 'Scripts', 'pip.exe')
+    : join(venvPath, 'bin', 'pip');
+
+  if (existsSync(pipPath)) {
+    return { command: pipPath, args: [], display: pipPath };
+  }
+
+  return { command: pythonExec, args: ['-m', 'pip'], display: `${pythonExec} -m pip` };
+}
+
+async function ensurePip(
+  pythonExec: string,
+  controller: ReadableStreamDefaultController,
+  encoder: TextEncoder,
+  logFile: string
+): Promise<void> {
+  try {
+    sendLog(controller, encoder, `[APP] pip not found, attempting ensurepip...`, logFile);
+    await execFileAsync(pythonExec, ['-m', 'ensurepip', '--upgrade']);
+  } catch (error: any) {
+    sendLog(controller, encoder, `[WARN] Failed to run ensurepip: ${error.message}`, logFile);
   }
 }
 
@@ -133,7 +160,7 @@ export async function GET(request: NextRequest) {
           // Step 1: Fetch latest changes
           sendLog(controller, encoder, `[APP] Fetching latest changes...`, logFilePath);
           try {
-            await execAsync(`git fetch origin`, { cwd: nodePath });
+            await execFileAsync('git', ['fetch', 'origin'], { cwd: nodePath });
             sendLog(controller, encoder, `[APP] Fetched latest changes successfully`, logFilePath);
           } catch (error: any) {
             sendLog(controller, encoder, `[ERROR] Failed to fetch updates: ${error.message}`, logFilePath);
@@ -145,7 +172,7 @@ export async function GET(request: NextRequest) {
           if (commitId) {
             sendLog(controller, encoder, `[APP] Checking out commit ${commitId}...`, logFilePath);
             try {
-              await execAsync(`git checkout ${commitId}`, { cwd: nodePath });
+              await execFileAsync('git', ['checkout', commitId], { cwd: nodePath });
               sendLog(controller, encoder, `[APP] Checked out commit ${commitId} successfully`, logFilePath);
             } catch (error: any) {
               sendLog(controller, encoder, `[ERROR] Failed to checkout commit: ${error.message}`, logFilePath);
@@ -155,12 +182,12 @@ export async function GET(request: NextRequest) {
           } else if (branch) {
             sendLog(controller, encoder, `[APP] Checking out branch ${branch}...`, logFilePath);
             try {
-              await execAsync(`git checkout ${branch}`, { cwd: nodePath });
+              await execFileAsync('git', ['checkout', branch], { cwd: nodePath });
               sendLog(controller, encoder, `[APP] Checked out branch ${branch} successfully`, logFilePath);
               
               // Pull latest changes for the branch
               sendLog(controller, encoder, `[APP] Pulling latest changes...`, logFilePath);
-              await execAsync(`git pull origin ${branch}`, { cwd: nodePath });
+              await execFileAsync('git', ['pull', 'origin', branch], { cwd: nodePath });
               sendLog(controller, encoder, `[APP] Pulled latest changes successfully`, logFilePath);
             } catch (error: any) {
               sendLog(controller, encoder, `[ERROR] Failed to checkout/pull branch: ${error.message}`, logFilePath);
@@ -171,7 +198,7 @@ export async function GET(request: NextRequest) {
             // No commit or branch specified, pull current branch
             sendLog(controller, encoder, `[APP] Pulling latest changes...`, logFilePath);
             try {
-              await execAsync(`git pull`, { cwd: nodePath });
+              await execFileAsync('git', ['pull'], { cwd: nodePath });
               sendLog(controller, encoder, `[APP] Pulled latest changes successfully`, logFilePath);
             } catch (error: any) {
               sendLog(controller, encoder, `[ERROR] Failed to pull changes: ${error.message}`, logFilePath);
@@ -192,13 +219,13 @@ export async function GET(request: NextRequest) {
             }
 
             if (branch) {
-              await execAsync(`git clone --branch ${branch} --depth 1 ${cloneUrl} ${nodePath}`);
+              await execFileAsync('git', ['clone', '--branch', branch, '--depth', '1', cloneUrl, nodePath]);
             } else {
-              await execAsync(`git clone --depth 1 ${cloneUrl} ${nodePath}`);
+              await execFileAsync('git', ['clone', '--depth', '1', cloneUrl, nodePath]);
             }
 
             if (commitId && !branch) {
-              await execAsync(`git checkout ${commitId}`, { cwd: nodePath });
+              await execFileAsync('git', ['checkout', commitId], { cwd: nodePath });
             }
 
             sendLog(controller, encoder, `[APP] Repository cloned successfully`, logFilePath);
@@ -294,26 +321,41 @@ export async function GET(request: NextRequest) {
         // Determine Python executable (needed for ComfyUI launch later)
         const isWindows = process.platform === 'win32';
         const venvPath = join(spacePath, 'venv');
-        let pythonExec = 'python3';
-        let pipExec = 'pip3';
+        let pythonExec = isWindows ? 'python' : 'python3';
 
         if (existsSync(venvPath)) {
           pythonExec = isWindows
             ? join(venvPath, 'Scripts', 'python.exe')
             : join(venvPath, 'bin', 'python3');
-          pipExec = isWindows
-            ? join(venvPath, 'Scripts', 'pip.exe')
-            : join(venvPath, 'bin', 'pip3');
         }
 
         if (existsSync(requirementsPath)) {
+          let pipInfo = resolvePipCommand(pythonExec, venvPath);
+          if (pipInfo.command === pythonExec) {
+            await ensurePip(pythonExec, controller, encoder, logFilePath);
+            pipInfo = resolvePipCommand(pythonExec, venvPath);
+          }
+
+          try {
+            await execFileAsync(pipInfo.command, [...pipInfo.args, '--version'], { cwd: spacePath });
+          } catch (error: any) {
+            sendLog(
+              controller,
+              encoder,
+              `[ERROR] Pip is not available. Install python3-venv (or python3-pip) and try again. Details: ${error.message}`,
+              logFilePath
+            );
+            controller.close();
+            return;
+          }
+
           sendLog(controller, encoder, `[APP] Installing dependencies from requirements.txt...`, logFilePath);
 
           // Install from requirements.txt (which now includes all dependencies)
-          const pipProcess = spawn(pipExec, ['install', '-r', requirementsPath], {
+          const pipProcess = spawn(pipInfo.command, [...pipInfo.args, 'install', '-r', requirementsPath], {
             cwd: spacePath,
             env: { ...process.env },
-            shell: true,
+            shell: false,
           });
 
           pipProcess.stdout?.on('data', (data) => {
@@ -370,4 +412,3 @@ export async function GET(request: NextRequest) {
     },
   });
 }
-

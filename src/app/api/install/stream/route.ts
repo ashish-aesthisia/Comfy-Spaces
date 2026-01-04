@@ -22,7 +22,7 @@ function runCommand(
     const childProcess = spawn(command, args, {
       cwd,
       env: { ...process.env },
-      shell: true,
+      shell: false,
     });
 
     childProcess.stdout?.on('data', (data) => {
@@ -127,7 +127,7 @@ export async function GET(request: NextRequest) {
               ...process.env,
               GIT_TERMINAL_PROMPT: '0',
             },
-            shell: true,
+            shell: false,
           });
 
           const fetchProcessKill = () => {
@@ -180,7 +180,7 @@ export async function GET(request: NextRequest) {
             const checkoutProcess = spawn('git', checkoutArgs, {
               cwd: nodePath,
               env: { ...process.env },
-              shell: true,
+              shell: false,
             });
 
             const checkoutProcessKill = () => {
@@ -233,7 +233,7 @@ export async function GET(request: NextRequest) {
             const checkoutProcess = spawn('git', checkoutArgs, {
               cwd: nodePath,
               env: { ...process.env },
-              shell: true,
+              shell: false,
             });
 
             const checkoutProcessKill = () => {
@@ -284,7 +284,7 @@ export async function GET(request: NextRequest) {
             const pullProcess = spawn('git', ['pull', 'origin', branch], {
               cwd: nodePath,
               env: { ...process.env },
-              shell: true,
+              shell: false,
             });
 
             const pullProcessKill = () => {
@@ -337,7 +337,7 @@ export async function GET(request: NextRequest) {
             const pullProcess = spawn('git', ['pull'], {
               cwd: nodePath,
               env: { ...process.env },
-              shell: true,
+              shell: false,
             });
 
             const pullProcessKill = () => {
@@ -404,4 +404,3 @@ export async function GET(request: NextRequest) {
     },
   });
 }
-

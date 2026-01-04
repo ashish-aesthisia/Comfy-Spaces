@@ -3,9 +3,9 @@ import { join } from 'path';
 import { existsSync, mkdirSync } from 'fs';
 import { readFile } from 'fs/promises';
 import { promisify } from 'util';
-import { exec } from 'child_process';
+import { execFile } from 'child_process';
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 export async function POST(request: Request) {
   try {
@@ -66,15 +66,15 @@ export async function POST(request: Request) {
 
       if (branch) {
         // Clone specific branch
-        await execAsync(`git clone --branch ${branch} --depth 1 ${cloneUrl} ${nodePath}`);
+        await execFileAsync('git', ['clone', '--branch', branch, '--depth', '1', cloneUrl, nodePath]);
       } else {
         // Clone default branch
-        await execAsync(`git clone --depth 1 ${cloneUrl} ${nodePath}`);
+        await execFileAsync('git', ['clone', '--depth', '1', cloneUrl, nodePath]);
       }
 
       // Checkout specific commit if provided (and not using branch)
       if (commitId && !branch) {
-        await execAsync(`git checkout ${commitId}`, { cwd: nodePath });
+        await execFileAsync('git', ['checkout', commitId], { cwd: nodePath });
       }
     } catch (error: any) {
       // Clean up on error
@@ -104,4 +104,3 @@ export async function POST(request: Request) {
     );
   }
 }
-

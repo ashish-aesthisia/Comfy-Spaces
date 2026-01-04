@@ -2,11 +2,86 @@ import { NextRequest, NextResponse } from 'next/server';
 import { join } from 'path';
 import { readFile, writeFile, mkdir, readdir, cp } from 'fs/promises';
 import { existsSync } from 'fs';
-import { spawn } from 'child_process';
+import { spawn, execFile } from 'child_process';
 import { promisify } from 'util';
-import { exec } from 'child_process';
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
+
+type PythonCandidate = { command: string; args: string[] };
+
+function formatPythonCommand(candidate: PythonCandidate): string {
+  return [candidate.command, ...candidate.args].join(' ').trim();
+}
+
+function buildPythonCandidates(pythonVersion?: string): PythonCandidate[] {
+  const candidates: PythonCandidate[] = [];
+  const isWindows = process.platform === 'win32';
+  const versionMatch = pythonVersion?.trim().match(/^\d+(?:\.\d+)?/);
+  const version = versionMatch?.[0];
+
+  if (version) {
+    if (isWindows) {
+      candidates.push({ command: 'py', args: [`-${version}`] });
+    } else {
+      candidates.push({ command: `python${version}`, args: [] });
+    }
+  }
+
+  if (isWindows) {
+    candidates.push({ command: 'py', args: ['-3'] });
+    candidates.push({ command: 'python', args: [] });
+    candidates.push({ command: 'python3', args: [] });
+  } else {
+    candidates.push({ command: 'python3', args: [] });
+    candidates.push({ command: 'python', args: [] });
+  }
+
+  return candidates;
+}
+
+async function createVenv(
+  venvPath: string,
+  spacePath: string,
+  pythonVersion?: string
+): Promise<void> {
+  const candidates = buildPythonCandidates(pythonVersion);
+  let lastError: Error | null = null;
+
+  for (const candidate of candidates) {
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const venvProcess = spawn(
+          candidate.command,
+          [...candidate.args, '-m', 'venv', venvPath],
+          {
+            cwd: spacePath,
+            env: { ...process.env },
+            shell: false,
+          }
+        );
+
+        venvProcess.on('close', (code) => {
+          if (code === 0) {
+            resolve();
+          } else {
+            reject(new Error(`exit code ${code}`));
+          }
+        });
+
+        venvProcess.on('error', (error) => {
+          reject(error);
+        });
+      });
+      return;
+    } catch (error) {
+      lastError = error as Error;
+      console.warn(`Failed to create venv with ${formatPythonCommand(candidate)}: ${lastError.message}`);
+    }
+  }
+
+  const attempts = candidates.map(formatPythonCommand).join(', ');
+  throw new Error(`Failed to create venv using: ${attempts}${lastError ? `. Last error: ${lastError.message}` : ''}`);
+}
 
 function parseRequirements(content: string): string[] {
   const dependencies: string[] = [];
@@ -85,22 +160,23 @@ export async function POST(request: NextRequest) {
 
     // Clone ComfyUI from GitHub
     const comfyUIPath = join(spacePath, 'ComfyUI');
+    const cloneUrl = githubUrl.trim();
     
     try {
       if (releaseTag) {
         // Clone specific release tag
-        await execAsync(`git clone --branch ${releaseTag} --depth 1 ${githubUrl} ${comfyUIPath}`);
+        await execFileAsync('git', ['clone', '--branch', releaseTag, '--depth', '1', cloneUrl, comfyUIPath]);
       } else if (branch) {
         // Clone specific branch
-        await execAsync(`git clone --branch ${branch} --depth 1 ${githubUrl} ${comfyUIPath}`);
+        await execFileAsync('git', ['clone', '--branch', branch, '--depth', '1', cloneUrl, comfyUIPath]);
       } else {
         // Clone default branch
-        await execAsync(`git clone --depth 1 ${githubUrl} ${comfyUIPath}`);
+        await execFileAsync('git', ['clone', '--depth', '1', cloneUrl, comfyUIPath]);
       }
 
       // Checkout specific commit if provided (and not using release tag)
       if (commitId && !releaseTag) {
-        await execAsync(`git checkout ${commitId}`, { cwd: comfyUIPath });
+        await execFileAsync('git', ['checkout', commitId], { cwd: comfyUIPath });
       }
     } catch (error: any) {
       // Clean up on error
@@ -158,72 +234,7 @@ export async function POST(request: NextRequest) {
     // Create venv with specified Python version
     const venvPath = join(spacePath, 'venv');
     const pythonVersionToUse = pythonVersion || '3.11';
-    // Try python3.x first, fallback to python3
-    const pythonExecutable = `python${pythonVersionToUse}`;
-    
-    await new Promise<void>((resolve, reject) => {
-      const venvProcess = spawn(pythonExecutable, ['-m', 'venv', venvPath], {
-        cwd: spacePath,
-        env: { ...process.env },
-        shell: true,
-      });
-
-      venvProcess.on('close', (code) => {
-        if (code === 0) {
-          resolve();
-        } else {
-          // If specific version fails, try python3 as fallback
-          if (pythonExecutable !== 'python3') {
-            console.warn(`Failed to create venv with ${pythonExecutable} (exit code ${code}), trying python3...`);
-            const fallbackProcess = spawn('python3', ['-m', 'venv', venvPath], {
-              cwd: spacePath,
-              env: { ...process.env },
-              shell: true,
-            });
-            
-            fallbackProcess.on('close', (fallbackCode) => {
-              if (fallbackCode === 0) {
-                resolve();
-              } else {
-                reject(new Error(`Failed to create venv with ${pythonExecutable} (exit code ${code}) and fallback python3 (exit code ${fallbackCode})`));
-              }
-            });
-            
-            fallbackProcess.on('error', (fallbackError) => {
-              reject(new Error(`Failed to create venv with ${pythonExecutable} (exit code ${code}) and fallback error: ${fallbackError.message}`));
-            });
-          } else {
-            reject(new Error(`Failed to create venv with ${pythonExecutable}: exit code ${code}`));
-          }
-        }
-      });
-
-      venvProcess.on('error', (error) => {
-        // If spawn fails (command not found), try python3 as fallback
-        if (pythonExecutable !== 'python3') {
-          console.warn(`Failed to spawn ${pythonExecutable}, trying python3...`);
-          const fallbackProcess = spawn('python3', ['-m', 'venv', venvPath], {
-            cwd: spacePath,
-            env: { ...process.env },
-            shell: true,
-          });
-          
-          fallbackProcess.on('close', (code) => {
-            if (code === 0) {
-              resolve();
-            } else {
-              reject(new Error(`Failed to spawn ${pythonExecutable} and fallback python3 exited with code ${code}`));
-            }
-          });
-          
-          fallbackProcess.on('error', (fallbackError) => {
-            reject(new Error(`Failed to spawn both ${pythonExecutable} and python3: ${error.message} / ${fallbackError.message}`));
-          });
-        } else {
-          reject(error);
-        }
-      });
-    });
+    await createVenv(venvPath, spacePath, pythonVersionToUse);
 
     // Create log files
     const logsPath = join(spacePath, 'logs.txt');
@@ -250,4 +261,3 @@ export async function POST(request: NextRequest) {
     );
   }
 }
-

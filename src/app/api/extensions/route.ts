@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { readdir, readFile } from 'fs/promises';
 import { join } from 'path';
 import { existsSync } from 'fs';
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 
 interface NodeStatus {
   name: string;
@@ -23,9 +23,9 @@ async function getGitMetadata(nodePath: string): Promise<{ githubUrl?: string; b
   }
 
   try {
-    const githubUrl = execSync('git remote get-url origin', { cwd: nodePath, encoding: 'utf-8' }).trim();
-    const branch = execSync('git rev-parse --abbrev-ref HEAD', { cwd: nodePath, encoding: 'utf-8' }).trim();
-    const commitId = execSync('git rev-parse HEAD', { cwd: nodePath, encoding: 'utf-8' }).trim();
+    const githubUrl = execFileSync('git', ['remote', 'get-url', 'origin'], { cwd: nodePath, encoding: 'utf-8' }).trim();
+    const branch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: nodePath, encoding: 'utf-8' }).trim();
+    const commitId = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: nodePath, encoding: 'utf-8' }).trim();
     
     // Normalize GitHub URL to HTTPS format
     let normalizedUrl = githubUrl;
@@ -306,4 +306,3 @@ export async function GET(request: NextRequest) {
     );
   }
 }
-
