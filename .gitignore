@@ -13,9 +13,8 @@ node_modules/
 .DS_Store
 
 #spaces
-spaces/**/ComfyUI/
-spaces/**/venv/
-spaces/**/comfy-logs.txt
-spaces/**/logs.txt
+spaces/
+
+
 
 # Windows
