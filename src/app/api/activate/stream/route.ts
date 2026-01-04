@@ -249,8 +249,42 @@ function isPythonCommand(commandPart: string): boolean {
   return /(^|[\\/])python(?:\d+)?(?:\.exe)?$/i.test(commandPart.trim());
 }
 
+type PipCommand = { command: string; args: string[]; display: string };
+
+function resolvePipCommand(pythonExec: string, venvPath: string): PipCommand {
+  const isWindows = process.platform === 'win32';
+  const pipPath = isWindows
+    ? join(venvPath, 'Scripts', 'pip.exe')
+    : join(venvPath, 'bin', 'pip');
+
+  if (existsSync(pipPath)) {
+    return { command: pipPath, args: [], display: pipPath };
+  }
+
+  return { command: pythonExec, args: ['-m', 'pip'], display: `${pythonExec} -m pip` };
+}
+
+async function ensurePip(
+  pythonExec: string,
+  controller: ReadableStreamDefaultController,
+  encoder: TextEncoder,
+  logFile: string
+): Promise<void> {
+  try {
+    sendLog(controller, encoder, `[APP] pip not found, attempting ensurepip...`, logFile);
+    await withTimeout(
+      execFileAsync(pythonExec, ['-m', 'ensurepip', '--upgrade']),
+      60000,
+      'Timeout running ensurepip'
+    );
+  } catch (error: any) {
+    sendLog(controller, encoder, `[WARN] Failed to run ensurepip: ${error.message}`, logFile);
+  }
+}
+
 async function updateRequirementsTxt(
-  pipExec: string,
+  pipCommand: string,
+  pipArgs: string[],
   spacePath: string,
   controller: ReadableStreamDefaultController,
   encoder: TextEncoder,
@@ -259,7 +293,7 @@ async function updateRequirementsTxt(
   try {
     sendLog(controller, encoder, `[APP] Updating requirements.txt with installed packages...`, logFile);
     
-    const pipListProcess = spawn(pipExec, ['list', '--format=freeze'], {
+    const pipListProcess = spawn(pipCommand, [...pipArgs, 'list', '--format=freeze'], {
       cwd: spacePath,
       env: { ...process.env },
       shell: false,
@@ -325,7 +359,8 @@ async function updateRequirementsTxt(
 }
 
 async function createRequirementsBkpIfMissing(
-  pipExec: string,
+  pipCommand: string,
+  pipArgs: string[],
   spacePath: string,
   controller: ReadableStreamDefaultController,
   encoder: TextEncoder,
@@ -342,7 +377,7 @@ async function createRequirementsBkpIfMissing(
 
     sendLog(controller, encoder, `[APP] requirements.bkp not found. Creating from pip list...`, logFile);
     
-    const pipListProcess = spawn(pipExec, ['list', '--format=freeze'], {
+    const pipListProcess = spawn(pipCommand, [...pipArgs, 'list', '--format=freeze'], {
       cwd: spacePath,
       env: { ...process.env },
       shell: false,
@@ -1026,9 +1061,11 @@ export async function GET(request: NextRequest) {
         const pythonExec = isWindows 
           ? join(venvPath, 'Scripts', 'python.exe')
           : join(venvPath, 'bin', 'python3');
-        const pipExec = isWindows
-          ? join(venvPath, 'Scripts', 'pip')
-          : join(venvPath, 'bin', 'pip');
+        let pipInfo = resolvePipCommand(pythonExec, venvPath);
+        if (pipInfo.command === pythonExec) {
+          await ensurePip(pythonExec, controller, encoder, logFilePath);
+          pipInfo = resolvePipCommand(pythonExec, venvPath);
+        }
 
         // Display Python and pip versions
         sendLog(controller, encoder, `[APP] Python executable: ${pythonExec}`, logFilePath);
@@ -1039,12 +1076,19 @@ export async function GET(request: NextRequest) {
           sendLog(controller, encoder, `[WARN] Could not get Python version: ${error.message}`, logFilePath);
         }
 
-        sendLog(controller, encoder, `[APP] Pip executable: ${pipExec}`, logFilePath);
+        sendLog(controller, encoder, `[APP] Pip command: ${pipInfo.display}`, logFilePath);
         try {
-          const pipVersion = await getVersion(pipExec, ['--version'], spacePath, process.env);
+          const pipVersion = await getVersion(pipInfo.command, [...pipInfo.args, '--version'], spacePath, process.env);
           sendLog(controller, encoder, `[APP] Pip version: ${pipVersion}`, logFilePath);
         } catch (error: any) {
-          sendLog(controller, encoder, `[WARN] Could not get pip version: ${error.message}`, logFilePath);
+          sendLog(
+            controller,
+            encoder,
+            `[ERROR] Pip is not available. Install python3-venv (or python3-pip) and try again. Details: ${error.message}`,
+            logFilePath
+          );
+          controller.close();
+          return;
         }
 
         if (isCancelled) {
@@ -1072,7 +1116,7 @@ export async function GET(request: NextRequest) {
               // Install requirements with process tracking
               // Use --upgrade-strategy=only-if-needed to allow pip to resolve conflicts
               // This will upgrade packages only if needed to satisfy dependencies
-              const pipProcess = spawn(pipExec, ['install', '-r', requirementsPath, '--upgrade-strategy', 'only-if-needed'], {
+              const pipProcess = spawn(pipInfo.command, [...pipInfo.args, 'install', '-r', requirementsPath, '--upgrade-strategy', 'only-if-needed'], {
                 cwd: spacePath,
                 env: { ...process.env },
                 shell: false,
@@ -1152,7 +1196,7 @@ export async function GET(request: NextRequest) {
                 writeFileSync(requirementsPath, adjustedContent, 'utf-8');
                 
                 // Try installation again with relaxed constraints
-                const retryPipProcess = spawn(pipExec, ['install', '-r', requirementsPath, '--upgrade-strategy', 'only-if-needed'], {
+                const retryPipProcess = spawn(pipInfo.command, [...pipInfo.args, 'install', '-r', requirementsPath, '--upgrade-strategy', 'only-if-needed'], {
                   cwd: spacePath,
                   env: { ...process.env },
                   shell: false,
@@ -1219,12 +1263,12 @@ export async function GET(request: NextRequest) {
               }
 
               // Update requirements.txt with pip list
-              await updateRequirementsTxt(pipExec, spacePath, controller, encoder, logFilePath);
+              await updateRequirementsTxt(pipInfo.command, pipInfo.args, spacePath, controller, encoder, logFilePath);
             } else {
               sendLog(controller, encoder, `[INFO] No dependencies found in space.json`, logFilePath);
               
               // Still update requirements.txt with currently installed packages
-              await updateRequirementsTxt(pipExec, spacePath, controller, encoder, logFilePath);
+              await updateRequirementsTxt(pipInfo.command, pipInfo.args, spacePath, controller, encoder, logFilePath);
             }
           } catch (error: any) {
             sendLog(controller, encoder, `[WARN] Error reading space.json: ${error.message}`, logFilePath);
@@ -1234,7 +1278,7 @@ export async function GET(request: NextRequest) {
         }
 
         // Create requirements.bkp if it doesn't exist
-        await createRequirementsBkpIfMissing(pipExec, spacePath, controller, encoder, logFilePath);
+        await createRequirementsBkpIfMissing(pipInfo.command, pipInfo.args, spacePath, controller, encoder, logFilePath);
 
         // Save requirements history snapshot after activation
         await saveRequirementsHistory(spacePath, 'activation');

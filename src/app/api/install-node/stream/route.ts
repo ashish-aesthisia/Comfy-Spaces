@@ -65,6 +65,35 @@ function sendLog(controller: ReadableStreamDefaultController, encoder: TextEncod
   }
 }
 
+type PipCommand = { command: string; args: string[]; display: string };
+
+function resolvePipCommand(pythonExec: string, venvPath: string): PipCommand {
+  const isWindows = process.platform === 'win32';
+  const pipPath = isWindows
+    ? join(venvPath, 'Scripts', 'pip.exe')
+    : join(venvPath, 'bin', 'pip');
+
+  if (existsSync(pipPath)) {
+    return { command: pipPath, args: [], display: pipPath };
+  }
+
+  return { command: pythonExec, args: ['-m', 'pip'], display: `${pythonExec} -m pip` };
+}
+
+async function ensurePip(
+  pythonExec: string,
+  controller: ReadableStreamDefaultController,
+  encoder: TextEncoder,
+  logFile: string
+): Promise<void> {
+  try {
+    sendLog(controller, encoder, `[APP] pip not found, attempting ensurepip...`, logFile);
+    await execFileAsync(pythonExec, ['-m', 'ensurepip', '--upgrade']);
+  } catch (error: any) {
+    sendLog(controller, encoder, `[WARN] Failed to run ensurepip: ${error.message}`, logFile);
+  }
+}
+
 export async function GET(request: NextRequest) {
   const encoder = new TextEncoder();
   const searchParams = request.nextUrl.searchParams;
@@ -293,22 +322,37 @@ export async function GET(request: NextRequest) {
         const isWindows = process.platform === 'win32';
         const venvPath = join(spacePath, 'venv');
         let pythonExec = isWindows ? 'python' : 'python3';
-        let pipExec = isWindows ? 'pip' : 'pip3';
 
         if (existsSync(venvPath)) {
           pythonExec = isWindows
             ? join(venvPath, 'Scripts', 'python.exe')
             : join(venvPath, 'bin', 'python3');
-          pipExec = isWindows
-            ? join(venvPath, 'Scripts', 'pip.exe')
-            : join(venvPath, 'bin', 'pip3');
         }
 
         if (existsSync(requirementsPath)) {
+          let pipInfo = resolvePipCommand(pythonExec, venvPath);
+          if (pipInfo.command === pythonExec) {
+            await ensurePip(pythonExec, controller, encoder, logFilePath);
+            pipInfo = resolvePipCommand(pythonExec, venvPath);
+          }
+
+          try {
+            await execFileAsync(pipInfo.command, [...pipInfo.args, '--version'], { cwd: spacePath });
+          } catch (error: any) {
+            sendLog(
+              controller,
+              encoder,
+              `[ERROR] Pip is not available. Install python3-venv (or python3-pip) and try again. Details: ${error.message}`,
+              logFilePath
+            );
+            controller.close();
+            return;
+          }
+
           sendLog(controller, encoder, `[APP] Installing dependencies from requirements.txt...`, logFilePath);
 
           // Install from requirements.txt (which now includes all dependencies)
-          const pipProcess = spawn(pipExec, ['install', '-r', requirementsPath], {
+          const pipProcess = spawn(pipInfo.command, [...pipInfo.args, 'install', '-r', requirementsPath], {
             cwd: spacePath,
             env: { ...process.env },
             shell: false,
