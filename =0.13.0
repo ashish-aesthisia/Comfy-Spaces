@@ -1,7 +1,0 @@
-Collecting gguf
-  Downloading gguf-0.17.1-py3-none-any.whl.metadata (4.3 kB)
-Requirement already satisfied: numpy>=1.17 in ./spaces/comfyui-v0-5-1/venv/lib/python3.12/site-packages (from gguf) (2.4.0)
-Requirement already satisfied: pyyaml>=5.1 in ./spaces/comfyui-v0-5-1/venv/lib/python3.12/site-packages (from gguf) (6.0.3)
-Requirement already satisfied: tqdm>=4.27 in ./spaces/comfyui-v0-5-1/venv/lib/python3.12/site-packages (from gguf) (4.67.1)
-Downloading gguf-0.17.1-py3-none-any.whl (96 kB)
-Would install gguf-0.17.1
