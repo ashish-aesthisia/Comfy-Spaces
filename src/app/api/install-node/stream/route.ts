@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import { join } from 'path';
-import { spawn, execFile } from 'child_process';
+import { execFile } from 'child_process';
 import { existsSync, appendFileSync, mkdirSync, writeFileSync, readFileSync } from 'fs';
 import { readFile, writeFile, mkdir } from 'fs/promises';
 import { promisify } from 'util';
@@ -62,35 +62,6 @@ function sendLog(controller: ReadableStreamDefaultController, encoder: TextEncod
     } catch (error) {
       console.error('Error writing to log file:', error);
     }
-  }
-}
-
-type PipCommand = { command: string; args: string[]; display: string };
-
-function resolvePipCommand(pythonExec: string, venvPath: string): PipCommand {
-  const isWindows = process.platform === 'win32';
-  const pipPath = isWindows
-    ? join(venvPath, 'Scripts', 'pip.exe')
-    : join(venvPath, 'bin', 'pip');
-
-  if (existsSync(pipPath)) {
-    return { command: pipPath, args: [], display: pipPath };
-  }
-
-  return { command: pythonExec, args: ['-m', 'pip'], display: `${pythonExec} -m pip` };
-}
-
-async function ensurePip(
-  pythonExec: string,
-  controller: ReadableStreamDefaultController,
-  encoder: TextEncoder,
-  logFile: string
-): Promise<void> {
-  try {
-    sendLog(controller, encoder, `[APP] pip not found, attempting ensurepip...`, logFile);
-    await execFileAsync(pythonExec, ['-m', 'ensurepip', '--upgrade']);
-  } catch (error: any) {
-    sendLog(controller, encoder, `[WARN] Failed to run ensurepip: ${error.message}`, logFile);
   }
 }
 
@@ -401,83 +372,20 @@ export async function GET(request: NextRequest) {
           }
         }
 
-        // Step 4: Install dependencies from requirements.txt
-        // Determine Python executable (needed for ComfyUI launch later)
-        const isWindows = process.platform === 'win32';
-        const venvPath = join(spacePath, 'venv');
-        let pythonExec = isWindows ? 'python' : 'python3';
-
-        if (existsSync(venvPath)) {
-          pythonExec = isWindows
-            ? join(venvPath, 'Scripts', 'python.exe')
-            : join(venvPath, 'bin', 'python3');
-        }
-
-        if (existsSync(requirementsPath)) {
-          let pipInfo = resolvePipCommand(pythonExec, venvPath);
-          if (pipInfo.command === pythonExec) {
-            await ensurePip(pythonExec, controller, encoder, logFilePath);
-            pipInfo = resolvePipCommand(pythonExec, venvPath);
-          }
-
-          try {
-            await execFileAsync(pipInfo.command, [...pipInfo.args, '--version'], { cwd: spacePath });
-          } catch (error: any) {
-            sendLog(
-              controller,
-              encoder,
-              `[ERROR] Pip is not available. Install python3-venv (or python3-pip) and try again. Details: ${error.message}`,
-              logFilePath
-            );
-            controller.close();
-            return;
-          }
-
-          sendLog(controller, encoder, `[APP] Installing dependencies from requirements.txt...`, logFilePath);
-
-          // Install from requirements.txt (which now includes all dependencies)
-          const pipProcess = spawn(pipInfo.command, [...pipInfo.args, 'install', '-r', requirementsPath], {
-            cwd: spacePath,
-            env: { ...process.env },
-            shell: false,
-          });
-
-          pipProcess.stdout?.on('data', (data) => {
-            const output = data.toString();
-            sendLog(controller, encoder, output.trim(), logFilePath);
-          });
-
-          pipProcess.stderr?.on('data', (data) => {
-            const output = data.toString();
-            sendLog(controller, encoder, output.trim(), logFilePath);
-          });
-
-          const pipCode = await new Promise<number>((resolve) => {
-            pipProcess.on('close', (code) => {
-              resolve(code || 0);
-            });
-            pipProcess.on('error', () => {
-              resolve(1);
-            });
-          });
-
-          if (pipCode === 0) {
-            sendLog(controller, encoder, `[APP] All dependencies from requirements.txt installed successfully`, logFilePath);
-          } else {
-            sendLog(controller, encoder, `[WARN] Some dependencies may have failed to install`, logFilePath);
-          }
-        } else {
-          sendLog(controller, encoder, `[APP] No requirements.txt found, skipping dependency installation`, logFilePath);
-        }
+        // Step 4: Dependencies will be installed during space reactivation
+        // We've already updated requirements.txt above, so dependencies will be installed
+        // automatically when ComfyUI is restarted via the activation stream
+        sendLog(controller, encoder, `[APP] Dependencies added to requirements.txt. They will be installed during space reactivation.`, logFilePath);
 
         // Step 5: Save requirements history snapshot
         await saveRequirementsHistory(spacePath, 'node_install', nodeName);
 
-        // Step 6: Installation complete - signal frontend to restart ComfyUI
+        // Step 6: Installation complete - signal frontend to reactivate space
+        // This will install dependencies and restart ComfyUI
         sendLog(controller, encoder, `[APP] Node installation completed successfully`, logFilePath);
-        sendLog(controller, encoder, `[APP] Restarting ComfyUI...`, logFilePath);
+        sendLog(controller, encoder, `[APP] Ready to reactivate space (dependencies will be installed during reactivation)...`, logFilePath);
         
-        // Send signal to frontend to restart ComfyUI
+        // Send signal to frontend to reactivate space
         sendLog(controller, encoder, `[INSTALL_COMPLETE]`, logFilePath);
         
         controller.close();

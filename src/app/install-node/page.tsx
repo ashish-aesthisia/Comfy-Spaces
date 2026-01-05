@@ -68,13 +68,13 @@ export default function InstallNodePage() {
         return {
           ...dep,
           subdependencies: dep.subdependencies.map(sub => 
-            sub.name === depName ? { ...sub, selected: !sub.selected } : sub
+            sub.name === depName ? { ...sub, selected: sub.selected !== true } : sub
           ),
         };
       } else if (!isSubDep && dep.name === depName) {
         return {
           ...dep,
-          selected: !dep.selected,
+          selected: dep.selected !== true,
         };
       }
       return dep;
@@ -157,7 +157,7 @@ export default function InstallNodePage() {
       
       if (dependencies) {
         dependencies.forEach(dep => {
-          if (dep.selected !== false) {
+          if (dep.selected === true) {
             selectedDeps.push({
               name: dep.name,
               version: dep.version,
@@ -165,7 +165,7 @@ export default function InstallNodePage() {
           }
           
           dep.subdependencies.forEach(subDep => {
-            if (subDep.selected !== false) {
+            if (subDep.selected === true) {
               selectedDeps.push({
                 name: subDep.name,
                 version: subDep.version,
@@ -348,7 +348,7 @@ export default function InstallNodePage() {
     }
 
     setIsRestarting(true);
-    setLogs(prev => [...prev, '[APP] Restarting ComfyUI...']);
+    setLogs(prev => [...prev, '[APP] Reactivating space to install dependencies and restart ComfyUI...']);
 
     // Close existing event source if any
     if (restartEventSourceRef.current) {
@@ -583,7 +583,7 @@ export default function InstallNodePage() {
                             >
                               <Group gap="xs" style={{ flex: 1 }}>
                                 <Checkbox
-                                  checked={dep.selected !== false}
+                                  checked={dep.selected === true}
                                   onChange={() => toggleDependencySelection(dep.name)}
                                   size="sm"
                                   styles={{
@@ -631,7 +631,7 @@ export default function InstallNodePage() {
                                   {dep.subdependencies.map((subDep, subIndex) => (
                                     <Group key={subIndex} gap="xs" style={{ paddingLeft: '1rem' }}>
                                       <Checkbox
-                                        checked={subDep.selected !== false}
+                                        checked={subDep.selected === true}
                                         onChange={() => toggleDependencySelection(subDep.name, true, dep.name)}
                                         size="xs"
                                         styles={{
@@ -672,7 +672,7 @@ export default function InstallNodePage() {
                           const selectedDeps: Array<{ name: string; version?: string; isSub: boolean; parentName?: string }> = [];
                           
                           dependencies.forEach(dep => {
-                            if (dep.selected !== false) {
+                            if (dep.selected === true) {
                               selectedDeps.push({
                                 name: dep.name,
                                 version: dep.version,
@@ -681,7 +681,7 @@ export default function InstallNodePage() {
                             }
                             
                             dep.subdependencies.forEach(subDep => {
-                              if (subDep.selected !== false) {
+                              if (subDep.selected === true) {
                                 selectedDeps.push({
                                   name: subDep.name,
                                   version: subDep.version,

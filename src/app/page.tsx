@@ -1007,13 +1007,6 @@ export default function Home() {
             const res = await fetch('/api/spaces');
             const data: SpacesData = await res.json();
             setSpaces(data);
-            if (data.selectedVersion) {
-              setSelectedSpace(data.selectedVersion);
-              // Automatically activate the new space
-              setTimeout(() => {
-                handleActivate();
-              }, 500);
-            }
           } catch (err) {
             console.error('Error refreshing spaces:', err);
           }
