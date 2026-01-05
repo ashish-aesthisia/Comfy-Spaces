@@ -263,8 +263,8 @@ export default function CreateSpaceModal({ opened, onClose, onSuccess }: CreateS
               option: { 
                 backgroundColor: '#25262b',
                 color: '#ffffff',
-                '&[data-selected]': { backgroundColor: '#373a40' },
-                '&[data-hovered]': { backgroundColor: '#2c2e33' },
+                '&[dataSelected]': { backgroundColor: '#373a40' },
+                '&[dataHovered]': { backgroundColor: '#2c2e33' },
               },
             }}
           />
