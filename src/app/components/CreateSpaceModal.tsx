@@ -562,45 +562,57 @@ export default function CreateSpaceModal({ opened, onClose, onSuccess }: CreateS
                     {releases.length} release{releases.length !== 1 ? 's' : ''} available
                   </Text>
                 )}
-                <Autocomplete
-                  label="Torch Version"
-                  placeholder="Select or type torch version"
-                  data={torchVersions}
-                  value={torchVersion}
-                  onChange={setTorchVersion}
-                  disabled={creating}
-                  leftSection={
-                    gpuInfo.torchVersion ? (
-                      <Text size="xs" c="#888888" fw={500} style={{ whiteSpace: 'nowrap' }}>
-                        {gpuInfo.torchVersion}
-                      </Text>
-                    ) : null
-                  }
-                  leftSectionWidth={gpuInfo.torchVersion ? 96 : undefined}
-                  leftSectionPointerEvents="none"
-                  description={
-                    gpuInfo.cudaVersion
-                      ? `Recommended for CUDA ${gpuInfo.cudaVersion}: ${getDefaultTorchVersion(gpuInfo.cudaVersion)}`
-                      : 'Select a version, enter a custom value, or paste a wheel URL'
-                  }
-                  styles={{
-                    label: { color: '#ffffff', marginBottom: '6px', fontWeight: 500 },
-                    input: { 
-                      backgroundColor: '#25262b', 
-                      border: '1px solid #373a40', 
-                      color: '#ffffff',
-                      '&:focus': { borderColor: '#0070f3' },
-                    },
-                    dropdown: { backgroundColor: '#25262b', border: '1px solid #373a40' },
-                    option: { 
-                      backgroundColor: '#25262b',
-                      color: '#ffffff',
-                      '&[dataSelected]': { backgroundColor: '#373a40' },
-                      '&[dataHovered]': { backgroundColor: '#2c2e33' },
-                    },
-                    description: { color: '#888888', fontSize: '12px', marginTop: '4px' },
-                  }}
-                />
+                <Group gap="sm" align="flex-end" wrap="nowrap">
+                  {gpuInfo.torchVersion && (
+                    <Text
+                      size="xs"
+                      fw={600}
+                      c="#888888"
+                      style={{
+                        border: '1px solid #373a40',
+                        padding: '6px 8px',
+                        borderRadius: '6px',
+                        whiteSpace: 'nowrap',
+                        backgroundColor: '#1a1b1e',
+                        lineHeight: 1,
+                      }}
+                    >
+                      {gpuInfo.torchVersion}
+                    </Text>
+                  )}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <Autocomplete
+                      label="Torch Version"
+                      placeholder="Select or type torch version"
+                      data={torchVersions}
+                      value={torchVersion}
+                      onChange={setTorchVersion}
+                      disabled={creating}
+                      description={
+                        gpuInfo.cudaVersion
+                          ? `Recommended for CUDA ${gpuInfo.cudaVersion}: ${getDefaultTorchVersion(gpuInfo.cudaVersion)}`
+                          : 'Select a version, enter a custom value, or paste a wheel URL'
+                      }
+                      styles={{
+                        label: { color: '#ffffff', marginBottom: '6px', fontWeight: 500 },
+                        input: { 
+                          backgroundColor: '#25262b', 
+                          border: '1px solid #373a40', 
+                          color: '#ffffff',
+                          '&:focus': { borderColor: '#0070f3' },
+                        },
+                        dropdown: { backgroundColor: '#25262b', border: '1px solid #373a40' },
+                        option: { 
+                          backgroundColor: '#25262b',
+                          color: '#ffffff',
+                          '&[dataSelected]': { backgroundColor: '#373a40' },
+                          '&[dataHovered]': { backgroundColor: '#2c2e33' },
+                        },
+                        description: { color: '#888888', fontSize: '12px', marginTop: '4px' },
+                      }}
+                    />
+                  </div>
+                </Group>
               </Stack>
             </Grid.Col>
           </Grid>
