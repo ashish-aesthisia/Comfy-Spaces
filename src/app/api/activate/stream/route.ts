@@ -292,6 +292,15 @@ function getVersion(
   });
 }
 
+async function getTorchVersion(command: string, cwd: string, env: NodeJS.ProcessEnv): Promise<string | null> {
+  try {
+    const version = await getVersion(command, ['-c', 'import torch, sys; sys.stdout.write(torch.__version__)'], cwd, env);
+    return version.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
 function splitCommandArgs(command: string): string[] {
   const args: string[] = [];
   let current = '';
@@ -1226,11 +1235,30 @@ export async function GET(request: NextRequest) {
             const spaceJsonContent = readFileSync(spaceJsonPath, 'utf-8');
             const spaceJson = JSON.parse(spaceJsonContent);
             const dependencies = spaceJson.dependencies || [];
-            
-            if (dependencies.length > 0) {
+            let dependenciesToInstall = dependencies;
+            const normalizedTorchVersion = typeof spaceJson.metadata?.torchVersion === 'string'
+              ? spaceJson.metadata.torchVersion.trim().replace(/^torch==/i, '')
+              : '';
+
+            if (
+              normalizedTorchVersion &&
+              normalizedTorchVersion.toLowerCase() !== 'latest' &&
+              normalizedTorchVersion.toLowerCase() !== 'torch' &&
+              !/^https?:\/\//i.test(normalizedTorchVersion)
+            ) {
+              const installedTorchVersion = await getTorchVersion(pythonExec, spacePath, process.env);
+              if (installedTorchVersion && installedTorchVersion === normalizedTorchVersion) {
+                dependenciesToInstall = dependencies.filter((dep: string) => !/^torch($|[=<>!~]|\s@)/i.test(dep.trim()));
+                if (dependenciesToInstall.length !== dependencies.length) {
+                  sendLog(controller, encoder, `[APP] Torch ${installedTorchVersion} already installed, skipping torch install`, logFilePath);
+                }
+              }
+            }
+
+            if (dependenciesToInstall.length > 0) {
               // Create temporary requirements.txt from space.json dependencies
               const tempRequirementsPath = join(spacePath, 'requirements_temp.txt');
-              const requirementsContent = dependencies.map((dep: string) => dep).join('\n');
+              const requirementsContent = dependenciesToInstall.map((dep: string) => dep).join('\n');
               writeFileSync(tempRequirementsPath, requirementsContent, 'utf-8');
               requirementsPath = tempRequirementsPath;
               
@@ -1388,7 +1416,10 @@ export async function GET(request: NextRequest) {
               // Update requirements.txt with pip list
               await updateRequirementsTxt(pipInfo.command, pipInfo.args, spacePath, controller, encoder, logFilePath);
             } else {
-              sendLog(controller, encoder, `[INFO] No dependencies found in space.json`, logFilePath);
+              const infoMessage = dependencies.length > 0
+                ? '[INFO] All dependencies already installed'
+                : '[INFO] No dependencies found in space.json';
+              sendLog(controller, encoder, infoMessage, logFilePath);
               
               // Still update requirements.txt with currently installed packages
               await updateRequirementsTxt(pipInfo.command, pipInfo.args, spacePath, controller, encoder, logFilePath);

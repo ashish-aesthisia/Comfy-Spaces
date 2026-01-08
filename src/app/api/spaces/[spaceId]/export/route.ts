@@ -30,9 +30,31 @@ export async function GET(
     }
 
     const spaceJsonContent = await readFile(spaceJsonPath, 'utf-8');
+    const spaceJson = JSON.parse(spaceJsonContent);
+    spaceJson.metadata = spaceJson.metadata || {};
+    if (!spaceJson.metadata.torchVersion) {
+      const requirementsPath = join(spacesPath, spaceId, 'requirements.txt');
+      if (existsSync(requirementsPath)) {
+        const torchLine = (await readFile(requirementsPath, 'utf-8'))
+          .split('\n')
+          .map((line) => line.split('#')[0].trim())
+          .find((line) =>
+            line &&
+            !line.startsWith('--') &&
+            (/^torch($|[=<>!~\s@])/i.test(line) || /(^|\/)torch-.*\.(whl|zip|tar\.gz)$/i.test(line))
+          );
+        if (torchLine) {
+          const match = torchLine.match(/^torch\s*==\s*([^\s#]+)$/i);
+          spaceJson.metadata.torchVersion = match ? match[1] : torchLine;
+        }
+      }
+      if (!spaceJson.metadata.torchVersion) {
+        spaceJson.metadata.torchVersion = null;
+      }
+    }
     
     // Return as JSON with proper headers for download
-    return new NextResponse(spaceJsonContent, {
+    return new NextResponse(JSON.stringify(spaceJson, null, 2), {
       headers: {
         'Content-Type': 'application/json',
         'Content-Disposition': `attachment; filename="space-${spaceId}.json"`,
@@ -46,4 +68,3 @@ export async function GET(
     );
   }
 }
-
