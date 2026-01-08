@@ -563,30 +563,19 @@ export default function CreateSpaceModal({ opened, onClose, onSuccess }: CreateS
                     {releases.length} release{releases.length !== 1 ? 's' : ''} available
                   </Text>
                 )}
-                <Group gap="sm" align="flex-end" wrap="nowrap">
-                  {gpuInfo.torchVersion && (
-                    <Text
-                      size="xs"
-                      fw={600}
-                      c="#4dabf7"
-                      style={{
-                        border: '1px solid #2b3a55',
-                        padding: '6px 8px',
-                        borderRadius: '6px',
-                        whiteSpace: 'nowrap',
-                        backgroundColor: '#1b2230',
-                        lineHeight: 1,
-                        maxWidth: '140px',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                      }}
-                    >
-                      Current: {gpuInfo.torchVersion}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <Group gap="xs" align="center" justify="space-between">
+                    <Text size="sm" fw={500} c="#ffffff">
+                      Torch Version
                     </Text>
-                  )}
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <Autocomplete
-                      label="Torch Version"
+                    {gpuInfo.torchVersion && (
+                      <Text size="xs" fw={600} c="#4dabf7">
+                        Current: {gpuInfo.torchVersion}
+                      </Text>
+                    )}
+                  </Group>
+                  <Autocomplete
+                      label=""
                       placeholder="Select or type torch version"
                       data={torchVersions}
                       value={torchVersion}
@@ -598,7 +587,7 @@ export default function CreateSpaceModal({ opened, onClose, onSuccess }: CreateS
                           : 'Select a version, enter a custom value, or paste a wheel URL'
                       }
                       styles={{
-                        label: { color: '#ffffff', marginBottom: '6px', fontWeight: 500 },
+                        label: { display: 'none' },
                         input: { 
                           backgroundColor: '#25262b', 
                           border: '1px solid #373a40', 
@@ -616,7 +605,6 @@ export default function CreateSpaceModal({ opened, onClose, onSuccess }: CreateS
                       }}
                     />
                   </div>
-                </Group>
               </Stack>
             </Grid.Col>
           </Grid>
