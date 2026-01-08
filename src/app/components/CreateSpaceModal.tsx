@@ -28,6 +28,7 @@ export default function CreateSpaceModal({ opened, onClose, onSuccess }: CreateS
   const [selectedRelease, setSelectedRelease] = useState<string | null>(null);
   const [releases, setReleases] = useState<Release[]>([]);
   const [loadingReleases, setLoadingReleases] = useState(false);
+  const [showTorchOptions, setShowTorchOptions] = useState(false);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
@@ -579,13 +580,29 @@ export default function CreateSpaceModal({ opened, onClose, onSuccess }: CreateS
                       placeholder="Select or type torch version"
                       data={torchVersions}
                       value={torchVersion}
-                      onChange={setTorchVersion}
+                      onChange={(value) => {
+                        setTorchVersion(value);
+                        setShowTorchOptions(false);
+                      }}
+                      onFocus={() => setShowTorchOptions(true)}
+                      onBlur={() => setShowTorchOptions(false)}
+                      filter={({ options, search, limit }) => {
+                        const normalized = search.trim().toLowerCase();
+                        if (showTorchOptions || !normalized) return options.slice(0, limit);
+                        return options
+                          .reduce((acc, option) => {
+                            if ('group' in option) {
+                              const items = option.items.filter((item) => item.label.toLowerCase().includes(normalized));
+                              if (items.length) acc.push({ group: option.group, items });
+                            } else if (option.label.toLowerCase().includes(normalized)) {
+                              acc.push(option);
+                            }
+                            return acc;
+                          }, [] as typeof options)
+                          .slice(0, limit);
+                      }}
                       disabled={creating}
-                      description={
-                        gpuInfo.cudaVersion
-                          ? `Recommended for CUDA ${gpuInfo.cudaVersion}: ${getDefaultTorchVersion(gpuInfo.cudaVersion)}`
-                          : 'Select a version, enter a custom value, or paste a wheel URL'
-                      }
+                      description="Select a version, enter a custom value, or paste a wheel URL"
                       styles={{
                         label: { display: 'none' },
                         input: { 
@@ -604,6 +621,11 @@ export default function CreateSpaceModal({ opened, onClose, onSuccess }: CreateS
                         description: { color: '#888888', fontSize: '12px', marginTop: '4px' },
                       }}
                     />
+                  {gpuInfo.cudaVersion && (
+                    <Text size="xs" c="#888888">
+                      Recommended for CUDA {gpuInfo.cudaVersion}: {getDefaultTorchVersion(gpuInfo.cudaVersion)}
+                    </Text>
+                  )}
                   </div>
               </Stack>
             </Grid.Col>
