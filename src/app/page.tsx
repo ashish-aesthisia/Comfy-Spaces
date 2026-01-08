@@ -60,6 +60,7 @@ export default function Home() {
 
   useEffect(() => {
     // Fetch spaces on component mount
+    fetch('/api/system/gpu').catch(() => {});
     fetch('/api/spaces')
       .then(res => res.json())
       .then((data: SpacesData) => {

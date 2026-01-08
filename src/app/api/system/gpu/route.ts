@@ -5,6 +5,9 @@ import { promisify } from 'util';
 const execFileAsync = promisify(execFile);
 
 type GpuInfo = { gpuName: string | null; cudaVersion: string | null; torchVersion?: string | null };
+const CACHE_TTL_MS = 5 * 60 * 1000;
+let cached: { data: GpuInfo; at: number } | null = null;
+let inflight: Promise<GpuInfo> | null = null;
 
 function parseCudaVersion(output: string): string | null {
   const match = output.match(/CUDA Version:\s*([\d.]+)/i);
@@ -144,24 +147,39 @@ async function getTorchVersion(): Promise<string | null> {
 
 export async function GET() {
   try {
-    const [nvidiaInfo, torchVersion] = await Promise.all([getNvidiaInfo(), getTorchVersion()]);
-    if (nvidiaInfo?.gpuName || nvidiaInfo?.cudaVersion) {
-      return NextResponse.json({ ...nvidiaInfo, torchVersion: torchVersion || null });
+    const now = Date.now();
+    if (cached && now - cached.at < CACHE_TTL_MS) {
+      return NextResponse.json(cached.data);
     }
 
-    const gpuNames =
-      process.platform === 'darwin'
-        ? await getMacGpuNames()
-        : process.platform === 'win32'
-        ? await getWindowsGpuNames()
-        : await getLinuxGpuNames();
+    if (!inflight) {
+      inflight = (async () => {
+        const [nvidiaInfo, torchVersion] = await Promise.all([getNvidiaInfo(), getTorchVersion()]);
+        if (nvidiaInfo?.gpuName || nvidiaInfo?.cudaVersion) {
+          return { ...nvidiaInfo, torchVersion: torchVersion || null };
+        }
 
-    return NextResponse.json({
-      gpuName: pickGpuName(gpuNames),
-      cudaVersion: null,
-      torchVersion: torchVersion || null,
-    });
+        const gpuNames =
+          process.platform === 'darwin'
+            ? await getMacGpuNames()
+            : process.platform === 'win32'
+            ? await getWindowsGpuNames()
+            : await getLinuxGpuNames();
+
+        return {
+          gpuName: pickGpuName(gpuNames),
+          cudaVersion: null,
+          torchVersion: torchVersion || null,
+        };
+      })();
+    }
+
+    const data = await inflight;
+    cached = { data, at: Date.now() };
+    inflight = null;
+    return NextResponse.json(data);
   } catch (error) {
+    inflight = null;
     return NextResponse.json({ gpuName: null, cudaVersion: null, torchVersion: null });
   }
 }
