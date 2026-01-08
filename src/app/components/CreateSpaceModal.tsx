@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Modal, TextInput, Button, Stack, Group, Text, Select, Grid, Loader, Alert } from '@mantine/core';
+import { Modal, TextInput, Button, Stack, Group, Text, Select, Grid, Loader, Alert, Paper, Autocomplete } from '@mantine/core';
 import { RiErrorWarningLine, RiCheckLine } from 'react-icons/ri';
 
 interface Release {
@@ -21,14 +21,21 @@ export default function CreateSpaceModal({ opened, onClose, onSuccess }: CreateS
   const [visibleName, setVisibleName] = useState('');
   const [githubUrl, setGithubUrl] = useState('https://github.com/comfyanonymous/ComfyUI');
   const [pythonVersion, setPythonVersion] = useState('3.11');
+  const [torchVersion, setTorchVersion] = useState('');
   const [branch, setBranch] = useState('');
   const [commitId, setCommitId] = useState('');
+  const [cmdArgs, setCmdArgs] = useState('');
   const [selectedRelease, setSelectedRelease] = useState<string | null>(null);
   const [releases, setReleases] = useState<Release[]>([]);
   const [loadingReleases, setLoadingReleases] = useState(false);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+  const [gpuInfo, setGpuInfo] = useState<{ name: string | null; cudaVersion: string | null; loading: boolean }>({
+    name: null,
+    cudaVersion: null,
+    loading: false,
+  });
 
   // Generate space ID from visible name
   const generateSpaceId = (name: string): string => {
@@ -50,12 +57,94 @@ export default function CreateSpaceModal({ opened, onClose, onSuccess }: CreateS
     { value: '3.13', label: 'Python 3.13' },
   ];
 
+  const torchVersions = [
+    'latest',
+    '2.5.1+cu124',
+    '2.5.1+cu121',
+    '2.5.1+cu118',
+    '2.5.0+cu124',
+    '2.4.0+cu124',
+    '2.3.0+cu121',
+    '2.2.0+cu121',
+    '2.1.0+cu121',
+    '2.0.1+cu118',
+    '1.13.1+cu117',
+    '1.12.1+cu116',
+    '1.11.0+cu113',
+    '1.10.2+cu111',
+    '1.9.0+cu111',
+    '1.8.0+cu111',
+    '1.7.0+cu110',
+    '1.6.0+cu102',
+    '1.5.0+cu102',
+    '1.0.0+cu100',
+  ];
+
+  const getDefaultTorchVersion = (cudaVersion: string | null): string => {
+    if (cudaVersion?.startsWith('12.4')) {
+      return '2.5.1+cu124';
+    }
+    if (cudaVersion?.startsWith('12.1')) {
+      return '2.5.1+cu121';
+    }
+    if (cudaVersion?.startsWith('11.8')) {
+      return '2.5.1+cu118';
+    }
+    if (cudaVersion?.startsWith('11.7')) {
+      return '1.13.1+cu117';
+    }
+    if (cudaVersion?.startsWith('11.6')) {
+      return '1.12.1+cu116';
+    }
+    if (cudaVersion?.startsWith('11.3')) {
+      return '1.11.0+cu113';
+    }
+    if (cudaVersion?.startsWith('11.1')) {
+      return '1.10.2+cu111';
+    }
+    if (cudaVersion?.startsWith('11.0')) {
+      return '1.7.0+cu110';
+    }
+    if (cudaVersion?.startsWith('10.2')) {
+      return '1.6.0+cu102';
+    }
+    if (cudaVersion?.startsWith('10.0')) {
+      return '1.0.0+cu100';
+    }
+    return 'latest';
+  };
+
   // Fetch releases when modal opens
   useEffect(() => {
     if (opened && githubUrl) {
       fetchReleases();
     }
   }, [opened, githubUrl]);
+
+  useEffect(() => {
+    if (!opened) return;
+    let cancelled = false;
+    setGpuInfo((current) => ({ ...current, loading: true }));
+    fetch('/api/system/gpu')
+      .then((response) => response.json())
+      .then((data) => {
+        if (cancelled) return;
+        setGpuInfo({
+          name: data.gpuName || null,
+          cudaVersion: data.cudaVersion || null,
+          loading: false,
+        });
+        setTorchVersion((current) => current || getDefaultTorchVersion(data.cudaVersion || null));
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setGpuInfo({ name: null, cudaVersion: null, loading: false });
+        setTorchVersion((current) => current || 'latest');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [opened]);
 
   const fetchReleases = async () => {
     setLoadingReleases(true);
@@ -107,9 +196,11 @@ export default function CreateSpaceModal({ opened, onClose, onSuccess }: CreateS
           spaceId: generateSpaceId(visibleName),
           githubUrl,
           pythonVersion,
+          torchVersion: torchVersion.trim() || undefined,
           branch: branch || undefined,
           commitId: commitId || undefined,
           releaseTag: selectedRelease || undefined,
+          cmdArgs: cmdArgs.trim() || undefined,
         }),
       });
 
@@ -137,11 +228,14 @@ export default function CreateSpaceModal({ opened, onClose, onSuccess }: CreateS
     if (!creating) {
       setVisibleName('');
       setPythonVersion('3.11');
+      setTorchVersion('');
       setBranch('');
       setCommitId('');
+      setCmdArgs('');
       setSelectedRelease(null);
       setError(null);
       setSuccess(false);
+      setGpuInfo({ name: null, cudaVersion: null, loading: false });
       onClose();
     }
   };
@@ -200,6 +294,44 @@ export default function CreateSpaceModal({ opened, onClose, onSuccess }: CreateS
             Space created successfully!
           </Alert>
         )}
+
+        <Paper
+          p="md"
+          style={{
+            backgroundColor: '#0f0f0f',
+            border: '1px solid #373a40',
+            borderRadius: '8px',
+          }}
+        >
+          <Group justify="space-between" align="center" mb="sm">
+            <Text size="sm" fw={600} c="#ffffff">
+              Hardware Status
+            </Text>
+            {gpuInfo.loading && <Loader size="xs" />}
+          </Group>
+          <Grid gutter="sm">
+            <Grid.Col span={6}>
+              <Stack gap={2}>
+                <Text size="xs" c="#888888" fw={500}>
+                  GPU
+                </Text>
+                <Text size="sm" c="#ffffff" style={{ fontFamily: 'monospace' }}>
+                  {gpuInfo.name || 'Not detected'}
+                </Text>
+              </Stack>
+            </Grid.Col>
+            <Grid.Col span={6}>
+              <Stack gap={2}>
+                <Text size="xs" c="#888888" fw={500}>
+                  CUDA
+                </Text>
+                <Text size="sm" c="#ffffff" style={{ fontFamily: 'monospace' }}>
+                  {gpuInfo.cudaVersion || 'N/A'}
+                </Text>
+              </Stack>
+            </Grid.Col>
+          </Grid>
+        </Paper>
 
         <Stack gap="md">
           <TextInput
@@ -266,6 +398,24 @@ export default function CreateSpaceModal({ opened, onClose, onSuccess }: CreateS
                 '&[dataSelected]': { backgroundColor: '#373a40' },
                 '&[dataHovered]': { backgroundColor: '#2c2e33' },
               },
+            }}
+          />
+
+          <TextInput
+            label="ComfyUI Launch Args (Optional)"
+            placeholder="e.g., --port 8188 --preview-method taesd"
+            value={cmdArgs}
+            onChange={(e) => setCmdArgs(e.target.value)}
+            disabled={creating}
+            styles={{
+              label: { color: '#ffffff', marginBottom: '6px', fontWeight: 500 },
+              input: { 
+                backgroundColor: '#25262b', 
+                border: '1px solid #373a40', 
+                color: '#ffffff',
+                '&:focus': { borderColor: '#0070f3' },
+              },
+              description: { color: '#888888', fontSize: '12px', marginTop: '4px' },
             }}
           />
         </Stack>
@@ -410,6 +560,36 @@ export default function CreateSpaceModal({ opened, onClose, onSuccess }: CreateS
                     {releases.length} release{releases.length !== 1 ? 's' : ''} available
                   </Text>
                 )}
+                <Autocomplete
+                  label="Torch Version"
+                  placeholder="Select or type torch version"
+                  data={torchVersions}
+                  value={torchVersion}
+                  onChange={setTorchVersion}
+                  disabled={creating}
+                  description={
+                    gpuInfo.cudaVersion
+                      ? `Recommended for CUDA ${gpuInfo.cudaVersion}: ${getDefaultTorchVersion(gpuInfo.cudaVersion)}`
+                      : 'Select a version, enter a custom value, or paste a wheel URL'
+                  }
+                  styles={{
+                    label: { color: '#ffffff', marginBottom: '6px', fontWeight: 500 },
+                    input: { 
+                      backgroundColor: '#25262b', 
+                      border: '1px solid #373a40', 
+                      color: '#ffffff',
+                      '&:focus': { borderColor: '#0070f3' },
+                    },
+                    dropdown: { backgroundColor: '#25262b', border: '1px solid #373a40' },
+                    option: { 
+                      backgroundColor: '#25262b',
+                      color: '#ffffff',
+                      '&[dataSelected]': { backgroundColor: '#373a40' },
+                      '&[dataHovered]': { backgroundColor: '#2c2e33' },
+                    },
+                    description: { color: '#888888', fontSize: '12px', marginTop: '4px' },
+                  }}
+                />
               </Stack>
             </Grid.Col>
           </Grid>
@@ -455,4 +635,3 @@ export default function CreateSpaceModal({ opened, onClose, onSuccess }: CreateS
     </Modal>
   );
 }
-

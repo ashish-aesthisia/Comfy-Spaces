@@ -17,10 +17,12 @@ interface SpaceJson {
     visibleName: string;
     spaceId: string;
     pythonVersion: string;
+    torchVersion?: string | null;
     githubUrl: string;
     branch: string | null;
     commitId: string | null;
     releaseTag: string | null;
+    cmdArgs?: string | null;
     createdAt?: string;
     comfyUISource?: string;
   };
@@ -111,6 +113,12 @@ export default function ImportJsonModal({ opened, onClose, onSuccess }: ImportJs
       }
       if ('releaseTag' in metadata && metadata.releaseTag !== null && typeof metadata.releaseTag !== 'string') {
         errors.push('Metadata field "releaseTag" must be a string or null');
+      }
+      if ('torchVersion' in metadata && metadata.torchVersion !== null && typeof metadata.torchVersion !== 'string') {
+        errors.push('Metadata field "torchVersion" must be a string or null');
+      }
+      if ('cmdArgs' in metadata && metadata.cmdArgs !== null && typeof metadata.cmdArgs !== 'string') {
+        errors.push('Metadata field "cmdArgs" must be a string or null');
       }
 
       // Validate visibleName length
@@ -806,4 +814,3 @@ export default function ImportJsonModal({ opened, onClose, onSuccess }: ImportJs
     </Modal>
   );
 }
-

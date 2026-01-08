@@ -200,10 +200,12 @@ export async function POST(request: NextRequest) {
         visibleName: metadata.visibleName,
         spaceId: finalSpaceId,
         pythonVersion: metadata.pythonVersion,
+        torchVersion: metadata.torchVersion || null,
         githubUrl: metadata.githubUrl,
         branch: metadata.branch || null,
         commitId: metadata.commitId || null,
         releaseTag: metadata.releaseTag || null,
+        cmdArgs: metadata.cmdArgs || null,
         createdAt: metadata.createdAt || new Date().toISOString(),
         comfyUISource: metadata.comfyUISource || (metadata.releaseTag ? 'release' : (metadata.branch || metadata.commitId ? 'custom' : 'default')),
       },
@@ -240,5 +242,4 @@ export async function POST(request: NextRequest) {
     );
   }
 }
-
 

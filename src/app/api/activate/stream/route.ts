@@ -1460,6 +1460,16 @@ export async function GET(request: NextRequest) {
         
         // Check for COMFY_CMD first, then COMFYUI_LAUNCH_ARGS
         const comfyCmd = process.env.COMFY_CMD || process.env.COMFYUI_LAUNCH_ARGS;
+        let spaceCmdArgs = '';
+        if (!comfyCmd && existsSync(spaceJsonPath)) {
+          try {
+            const spaceJsonContent = readFileSync(spaceJsonPath, 'utf-8');
+            const spaceJson = JSON.parse(spaceJsonContent);
+            spaceCmdArgs = spaceJson.metadata?.cmdArgs || '';
+          } catch (error: any) {
+            sendLog(controller, encoder, `[WARN] Error reading space.json for launch args: ${error.message}`, logFilePath);
+          }
+        }
         if (comfyCmd) {
           // Parse the command - handle shell redirection like "> ./data/comfy-logs.txt"
           // Note: We ignore log file redirections and always use space/comfy-logs.txt
@@ -1491,6 +1501,30 @@ export async function GET(request: NextRequest) {
           }
           
           sendLog(controller, encoder, `[APP] Using custom ComfyUI launch command from environment`, logFilePath);
+        } else if (spaceCmdArgs) {
+          const parts = splitCommandArgs(spaceCmdArgs);
+          const args: string[] = [];
+          
+          for (let i = 0; i < parts.length; i++) {
+            const part = parts[i];
+            if (part === '>' && i + 1 < parts.length) {
+              i++;
+              continue;
+            } else if (part.startsWith('>')) {
+              continue;
+            } else if (isPythonCommand(part)) {
+              useSystemPython = /python3/i.test(part);
+              continue;
+            } else {
+              args.push(part);
+            }
+          }
+          
+          if (args.length > 0) {
+            comfyUIArgs = args.some((arg) => /\.py$/i.test(arg)) ? args : ['main.py', ...args];
+          }
+          
+          sendLog(controller, encoder, `[APP] Using custom ComfyUI launch args from space.json`, logFilePath);
         }
         
         // Always add --host=0.0.0.0 to allow external access

@@ -106,6 +106,51 @@ function parseRequirements(content: string): string[] {
   return dependencies;
 }
 
+function normalizeTorchRequirement(torchVersion?: string): string | null {
+  const trimmed = torchVersion?.trim();
+  if (!trimmed) return null;
+  if (/^https?:\/\//i.test(trimmed)) {
+    return trimmed;
+  }
+  if (['latest', 'torch', 'torch==latest'].includes(trimmed.toLowerCase())) {
+    return 'torch';
+  }
+  return trimmed.includes('torch') ? trimmed : `torch==${trimmed}`;
+}
+
+function torchIndexUrl(torchRequirement: string | null): string | null {
+  if (!torchRequirement || /^https?:\/\//i.test(torchRequirement) || /\s@\s/i.test(torchRequirement)) return null;
+  const match = torchRequirement.match(/\+([a-z0-9]+)$/i);
+  if (!match) return null;
+  const tag = match[1].toLowerCase();
+  if (tag.startsWith('cu') || tag === 'cpu') {
+    return `https://download.pytorch.org/whl/${tag}`;
+  }
+  return null;
+}
+
+function applyTorchToRequirements(content: string, torchRequirement: string | null): string {
+  if (!torchRequirement) return content;
+  const extraIndexUrl = torchIndexUrl(torchRequirement);
+  const lines = content.split('\n').filter((line) => {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) return true;
+    const clean = trimmed.split('#')[0].trim();
+    if (/^torch($|[=<>!~])/i.test(clean)) return false;
+    if (extraIndexUrl && /^--extra-index-url\b/i.test(clean) && clean.includes('download.pytorch.org/whl/')) {
+      return false;
+    }
+    return true;
+  });
+
+  if (extraIndexUrl && !lines.some((line) => line.trim() === `--extra-index-url ${extraIndexUrl}`)) {
+    lines.push(`--extra-index-url ${extraIndexUrl}`);
+  }
+
+  lines.push(torchRequirement);
+  return `${lines.join('\n').trimEnd()}\n`;
+}
+
 function generateSpaceId(visibleName: string): string {
   return visibleName
     .toLowerCase()
@@ -118,7 +163,7 @@ function generateSpaceId(visibleName: string): string {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { visibleName, spaceId, githubUrl, pythonVersion, branch, commitId, releaseTag } = body;
+    const { visibleName, spaceId, githubUrl, pythonVersion, branch, commitId, releaseTag, torchVersion, cmdArgs } = body;
 
     // Validate inputs
     if (!visibleName || visibleName.length < 2) {
@@ -205,7 +250,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const requirementsContent = await readFile(requirementsPath, 'utf-8');
+    const rawRequirementsContent = await readFile(requirementsPath, 'utf-8');
+    const torchRequirement = normalizeTorchRequirement(torchVersion);
+    const requirementsContent = applyTorchToRequirements(rawRequirementsContent, torchRequirement);
     const dependencies = parseRequirements(requirementsContent);
 
     // Copy requirements.txt to space
@@ -220,10 +267,12 @@ export async function POST(request: NextRequest) {
         visibleName: visibleName,
         spaceId: finalSpaceId,
         pythonVersion: pythonVersion || '3.11',
+        torchVersion: torchVersion?.trim() || null,
         githubUrl: githubUrl,
         branch: branch || null,
         commitId: commitId || null,
         releaseTag: releaseTag || null,
+        cmdArgs: cmdArgs?.trim() || null,
         createdAt: new Date().toISOString(),
         comfyUISource: releaseTag ? 'release' : (branch || commitId ? 'custom' : 'default'),
       },
