@@ -25,6 +25,7 @@ interface SpaceInfo {
   lastUpdated: string;
   path: string;
   comfyUIVersion: string;
+  cmdArgs?: string | null;
 }
 
 interface Dependency {
@@ -63,6 +64,13 @@ export default function ActivePage() {
   const restartEventSourceRef = useRef<EventSource | null>(null);
   const restartLogsEndRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
+  const comfyUIPort =
+    parseInt(
+      spaces
+        .find((space) => space.name === selectedVersion)
+        ?.cmdArgs?.match(/(?:^|\s)--port(?:=|\s+)\"?(\d+)\"?/)?.[1] || '',
+      10
+    ) || 8188;
 
   const handleUpdate = (node: Node) => {
     if (!node.githubUrl) return;
@@ -467,7 +475,7 @@ export default function ActivePage() {
       try {
         // Get the current hostname from the browser window
         const hostname = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
-        const comfyUIUrl = `http://${hostname}:8188`;
+        const comfyUIUrl = `http://${hostname}:${comfyUIPort}`;
         
         // Use an image request to check if ComfyUI is online
         // This works better with CORS restrictions
@@ -523,7 +531,7 @@ export default function ActivePage() {
     const interval = setInterval(checkComfyUIStatus, 5000);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [comfyUIPort]);
 
   return (
     <>
@@ -570,7 +578,7 @@ export default function ActivePage() {
                   variant="subtle"
                   size="sm"
                   component="a"
-                  href={typeof window !== 'undefined' ? `http://${window.location.hostname}:8188` : 'http://localhost:8188'}
+                  href={typeof window !== 'undefined' ? `http://${window.location.hostname}:${comfyUIPort}` : `http://localhost:${comfyUIPort}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   leftSection={
@@ -1278,4 +1286,3 @@ export default function ActivePage() {
     </>
   );
 }
-

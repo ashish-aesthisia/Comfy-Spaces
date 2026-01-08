@@ -31,9 +31,10 @@ export default function CreateSpaceModal({ opened, onClose, onSuccess }: CreateS
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
-  const [gpuInfo, setGpuInfo] = useState<{ name: string | null; cudaVersion: string | null; loading: boolean }>({
+  const [gpuInfo, setGpuInfo] = useState<{ name: string | null; cudaVersion: string | null; torchVersion: string | null; loading: boolean }>({
     name: null,
     cudaVersion: null,
+    torchVersion: null,
     loading: false,
   });
 
@@ -132,13 +133,14 @@ export default function CreateSpaceModal({ opened, onClose, onSuccess }: CreateS
         setGpuInfo({
           name: data.gpuName || null,
           cudaVersion: data.cudaVersion || null,
+          torchVersion: data.torchVersion || null,
           loading: false,
         });
         setTorchVersion((current) => current || getDefaultTorchVersion(data.cudaVersion || null));
       })
       .catch(() => {
         if (cancelled) return;
-        setGpuInfo({ name: null, cudaVersion: null, loading: false });
+        setGpuInfo({ name: null, cudaVersion: null, torchVersion: null, loading: false });
         setTorchVersion((current) => current || 'latest');
       });
     return () => {
@@ -235,7 +237,7 @@ export default function CreateSpaceModal({ opened, onClose, onSuccess }: CreateS
       setSelectedRelease(null);
       setError(null);
       setSuccess(false);
-      setGpuInfo({ name: null, cudaVersion: null, loading: false });
+      setGpuInfo({ name: null, cudaVersion: null, torchVersion: null, loading: false });
       onClose();
     }
   };
@@ -567,6 +569,15 @@ export default function CreateSpaceModal({ opened, onClose, onSuccess }: CreateS
                   value={torchVersion}
                   onChange={setTorchVersion}
                   disabled={creating}
+                  leftSection={
+                    gpuInfo.torchVersion ? (
+                      <Text size="xs" c="#888888" fw={500} style={{ whiteSpace: 'nowrap' }}>
+                        {gpuInfo.torchVersion}
+                      </Text>
+                    ) : null
+                  }
+                  leftSectionWidth={gpuInfo.torchVersion ? 96 : undefined}
+                  leftSectionPointerEvents="none"
                   description={
                     gpuInfo.cudaVersion
                       ? `Recommended for CUDA ${gpuInfo.cudaVersion}: ${getDefaultTorchVersion(gpuInfo.cudaVersion)}`

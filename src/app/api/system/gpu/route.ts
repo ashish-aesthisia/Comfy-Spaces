@@ -4,7 +4,7 @@ import { promisify } from 'util';
 
 const execFileAsync = promisify(execFile);
 
-type GpuInfo = { gpuName: string | null; cudaVersion: string | null };
+type GpuInfo = { gpuName: string | null; cudaVersion: string | null; torchVersion?: string | null };
 
 function parseCudaVersion(output: string): string | null {
   const match = output.match(/CUDA Version:\s*([\d.]+)/i);
@@ -112,11 +112,41 @@ async function getLinuxGpuNames(): Promise<string[]> {
   }
 }
 
+async function getTorchVersion(): Promise<string | null> {
+  const candidates =
+    process.platform === 'win32'
+      ? [
+          ['py', ['-3']],
+          ['python', []],
+          ['python3', []],
+        ]
+      : [
+          ['python3', []],
+          ['python', []],
+        ];
+
+  for (const [command, args] of candidates) {
+    try {
+      const { stdout } = await execFileAsync(command, [
+        ...args,
+        '-c',
+        'import torch, sys; sys.stdout.write(torch.__version__)',
+      ]);
+      const version = stdout.trim();
+      if (version) return version;
+    } catch (error) {
+      continue;
+    }
+  }
+
+  return null;
+}
+
 export async function GET() {
   try {
-    const nvidiaInfo = await getNvidiaInfo();
+    const [nvidiaInfo, torchVersion] = await Promise.all([getNvidiaInfo(), getTorchVersion()]);
     if (nvidiaInfo?.gpuName || nvidiaInfo?.cudaVersion) {
-      return NextResponse.json(nvidiaInfo);
+      return NextResponse.json({ ...nvidiaInfo, torchVersion: torchVersion || null });
     }
 
     const gpuNames =
@@ -129,8 +159,9 @@ export async function GET() {
     return NextResponse.json({
       gpuName: pickGpuName(gpuNames),
       cudaVersion: null,
+      torchVersion: torchVersion || null,
     });
   } catch (error) {
-    return NextResponse.json({ gpuName: null, cudaVersion: null });
+    return NextResponse.json({ gpuName: null, cudaVersion: null, torchVersion: null });
   }
 }

@@ -324,6 +324,24 @@ function splitCommandArgs(command: string): string[] {
   return args;
 }
 
+function extractPortFromArgs(command: string | null): number | null {
+  if (!command) return null;
+  const parts = splitCommandArgs(command);
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i];
+    if (part.startsWith('--port=')) {
+      const value = part.split('=')[1];
+      const port = value ? parseInt(value, 10) : NaN;
+      if (!Number.isNaN(port)) return port;
+    }
+    if (part === '--port' && i + 1 < parts.length) {
+      const port = parseInt(parts[i + 1], 10);
+      if (!Number.isNaN(port)) return port;
+    }
+  }
+  return null;
+}
+
 function isPythonCommand(commandPart: string): boolean {
   return /(^|[\\/])python(?:\d+)?(?:\.exe)?$/i.test(commandPart.trim());
 }
@@ -1063,8 +1081,20 @@ export async function GET(request: NextRequest) {
 
       try {
         const isWindows = process.platform === 'win32';
-        // Step 0: Check and kill existing ComfyUI process on port 8188
-        const COMFYUI_PORT = 8188;
+        const comfyCmd = process.env.COMFY_CMD || process.env.COMFYUI_LAUNCH_ARGS;
+        let spaceCmdArgs = '';
+        if (!comfyCmd && existsSync(spaceJsonPath)) {
+          try {
+            const spaceJsonContent = readFileSync(spaceJsonPath, 'utf-8');
+            const spaceJson = JSON.parse(spaceJsonContent);
+            spaceCmdArgs = spaceJson.metadata?.cmdArgs || '';
+          } catch (error: any) {
+            sendLog(controller, encoder, `[WARN] Error reading space.json for launch args: ${error.message}`, logFilePath);
+          }
+        }
+
+        // Step 0: Check and kill existing ComfyUI process on configured port
+        const COMFYUI_PORT = extractPortFromArgs(comfyCmd || spaceCmdArgs) || 8188;
         sendLog(controller, encoder, `[APP] Checking if port ${COMFYUI_PORT} is in use...`, logFilePath);
         
         const portInUse = await checkPortInUse(COMFYUI_PORT);
@@ -1459,17 +1489,6 @@ export async function GET(request: NextRequest) {
         let useSystemPython = false;
         
         // Check for COMFY_CMD first, then COMFYUI_LAUNCH_ARGS
-        const comfyCmd = process.env.COMFY_CMD || process.env.COMFYUI_LAUNCH_ARGS;
-        let spaceCmdArgs = '';
-        if (!comfyCmd && existsSync(spaceJsonPath)) {
-          try {
-            const spaceJsonContent = readFileSync(spaceJsonPath, 'utf-8');
-            const spaceJson = JSON.parse(spaceJsonContent);
-            spaceCmdArgs = spaceJson.metadata?.cmdArgs || '';
-          } catch (error: any) {
-            sendLog(controller, encoder, `[WARN] Error reading space.json for launch args: ${error.message}`, logFilePath);
-          }
-        }
         if (comfyCmd) {
           // Parse the command - handle shell redirection like "> ./data/comfy-logs.txt"
           // Note: We ignore log file redirections and always use space/comfy-logs.txt

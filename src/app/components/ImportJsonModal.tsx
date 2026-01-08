@@ -44,6 +44,7 @@ export default function ImportJsonModal({ opened, onClose, onSuccess }: ImportJs
   const [isDragging, setIsDragging] = useState(false);
   const [nameConflict, setNameConflict] = useState(false);
   const [newSpaceName, setNewSpaceName] = useState('');
+  const [cmdArgsValue, setCmdArgsValue] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Generate space ID from visible name
@@ -155,6 +156,7 @@ export default function ImportJsonModal({ opened, onClose, onSuccess }: ImportJs
       setFile(null);
       setJsonContent(null);
       setValidationResult(null);
+      setCmdArgsValue('');
       return;
     }
 
@@ -167,6 +169,7 @@ export default function ImportJsonModal({ opened, onClose, onSuccess }: ImportJs
       const text = await selectedFile.text();
       const parsed = JSON.parse(text);
       setJsonContent(parsed);
+      setCmdArgsValue(parsed?.metadata?.cmdArgs || '');
       
       const validation = validateJson(parsed);
       setValidationResult(validation);
@@ -175,6 +178,7 @@ export default function ImportJsonModal({ opened, onClose, onSuccess }: ImportJs
       setFile(null);
       setJsonContent(null);
       setValidationResult(null);
+      setCmdArgsValue('');
     }
   }, []);
 
@@ -233,7 +237,13 @@ export default function ImportJsonModal({ opened, onClose, onSuccess }: ImportJs
 
     try {
       // Prepare the data to send
-      const importData = { ...jsonContent };
+      const importData = {
+        ...jsonContent,
+        metadata: {
+          ...jsonContent.metadata,
+          cmdArgs: cmdArgsValue.trim() || null,
+        },
+      };
       
       // If using new name, update the metadata
       if (useNewName && newSpaceName) {
@@ -290,6 +300,7 @@ export default function ImportJsonModal({ opened, onClose, onSuccess }: ImportJs
       setIsDragging(false);
       setNameConflict(false);
       setNewSpaceName('');
+      setCmdArgsValue('');
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
@@ -473,6 +484,7 @@ export default function ImportJsonModal({ opened, onClose, onSuccess }: ImportJs
                   setFile(null);
                   setJsonContent(null);
                   setValidationResult(null);
+                  setCmdArgsValue('');
                   if (fileInputRef.current) {
                     fileInputRef.current.value = '';
                   }
@@ -710,6 +722,24 @@ export default function ImportJsonModal({ opened, onClose, onSuccess }: ImportJs
                         </Badge>
                       </Group>
                     </Stack>
+                  </Grid.Col>
+                  <Grid.Col span={12}>
+                    <TextInput
+                      label="ComfyUI Launch Args (Optional)"
+                      placeholder="e.g., --port 7860 --preview-method taesd"
+                      value={cmdArgsValue}
+                      onChange={(e) => setCmdArgsValue(e.currentTarget.value)}
+                      disabled={isImporting}
+                      styles={{
+                        label: { color: '#ffffff', marginBottom: '6px', fontWeight: 500 },
+                        input: {
+                          backgroundColor: '#25262b',
+                          border: '1px solid #373a40',
+                          color: '#ffffff',
+                          '&:focus': { borderColor: '#0070f3' },
+                        },
+                      }}
+                    />
                   </Grid.Col>
                 </Grid>
               </Paper>

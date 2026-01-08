@@ -8,6 +8,7 @@ interface SpaceInfo {
   name: string; // spaceId (directory name)
   visibleName: string; // visible name from space.json
   pythonVersion: string;
+  cmdArgs?: string | null;
   lastUpdated: string;
   path: string;
   comfyUIVersion: string;
@@ -38,6 +39,7 @@ export async function GET() {
         // Get visible name and Python version from space.json
         let visibleName = spaceId; // Fallback to spaceId if space.json doesn't exist
         let pythonVersion = 'Unknown';
+        let cmdArgs: string | null = null;
         try {
           if (existsSync(spaceJsonPath)) {
             const spaceJsonContent = await readFile(spaceJsonPath, 'utf-8');
@@ -47,6 +49,9 @@ export async function GET() {
             }
             if (spaceJson.metadata?.pythonVersion) {
               pythonVersion = spaceJson.metadata.pythonVersion;
+            }
+            if (spaceJson.metadata?.cmdArgs) {
+              cmdArgs = spaceJson.metadata.cmdArgs;
             }
           }
         } catch (error) {
@@ -100,6 +105,7 @@ export async function GET() {
           name: spaceId, // spaceId (directory name)
           visibleName: visibleName, // visible name from space.json
           pythonVersion,
+          cmdArgs,
           lastUpdated,
           path,
           comfyUIVersion,
@@ -130,4 +136,3 @@ export async function GET() {
     );
   }
 }
-
