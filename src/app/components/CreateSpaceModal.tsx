@@ -564,13 +564,13 @@ export default function CreateSpaceModal({ opened, onClose, onSuccess }: CreateS
                   </Text>
                 )}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  <Group gap="xs" align="center" justify="space-between">
+                  <Group gap={6} align="center">
                     <Text size="sm" fw={500} c="#ffffff">
                       Torch Version
                     </Text>
                     {gpuInfo.torchVersion && (
                       <Text size="xs" fw={600} c="#4dabf7">
-                        Current: {gpuInfo.torchVersion}
+                        Version: {gpuInfo.torchVersion}
                       </Text>
                     )}
                   </Group>
