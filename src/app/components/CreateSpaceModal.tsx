@@ -570,7 +570,7 @@ export default function CreateSpaceModal({ opened, onClose, onSuccess }: CreateS
                     </Text>
                     {gpuInfo.torchVersion && (
                       <Text size="xs" fw={600} c="#4dabf7">
-                        Version: {gpuInfo.torchVersion}
+                        Current Version: {gpuInfo.torchVersion}
                       </Text>
                     )}
                   </Group>
