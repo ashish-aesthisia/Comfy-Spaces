@@ -115,10 +115,70 @@ function generateSpaceId(visibleName: string): string {
     .replace(/^-|-$/g, ''); // Remove leading/trailing dashes
 }
 
+function overrideTorchPackages(
+  dependencies: string[],
+  torchVersion: string,
+  torchIndexUrl?: string
+): { dependencies: string[]; indexUrlComment?: string } {
+  // Packages to override
+  const torchPackages = ['torch', 'torchsde', 'torchvision', 'torchaudio'];
+  
+  // Remove existing torch packages
+  const filteredDeps = dependencies.filter(dep => {
+    const packageName = dep.split(/[=<>!~]/)[0].trim().toLowerCase();
+    return !torchPackages.some(torchPkg => packageName === torchPkg);
+  });
+  
+  // Add new torch packages with specified version
+  const torchDeps: string[] = [];
+  let indexUrlComment: string | undefined;
+  
+  // Determine version string
+  const versionMatch = torchVersion.match(/^(\d+\.\d+\.\d+)/);
+  const baseVersion = versionMatch ? versionMatch[1] : torchVersion;
+  
+  // For CUDA versions, add index URL comment
+  if (torchIndexUrl) {
+    // CUDA version format: torch==2.1.0+cu121
+    // Add comment with index URL for pip install
+    indexUrlComment = `# For CUDA torch packages, use: pip install --extra-index-url ${torchIndexUrl} torch==${torchVersion} torchvision torchaudio`;
+    // Only pin torch version, let torchvision and torchaudio resolve compatible versions
+    torchDeps.push(`torch==${torchVersion}`);
+    torchDeps.push(`torchvision`); // No version constraint - pip will resolve compatible version
+    torchDeps.push(`torchaudio`); // No version constraint - pip will resolve compatible version
+    // torchsde doesn't have CUDA builds, use without version constraint
+    torchDeps.push(`torchsde`);
+  } else {
+    // CPU version - only pin torch, let others resolve
+    torchDeps.push(`torch==${baseVersion}`);
+    torchDeps.push(`torchvision`); // No version constraint - pip will resolve compatible version
+    torchDeps.push(`torchaudio`); // No version constraint - pip will resolve compatible version
+    torchDeps.push(`torchsde`);
+  }
+  
+  // Insert torch packages at the beginning
+  filteredDeps.unshift(...torchDeps);
+  
+  return { dependencies: filteredDeps, indexUrlComment };
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { visibleName, spaceId, githubUrl, pythonVersion, branch, commitId, releaseTag } = body;
+    const { visibleName, spaceId, githubUrl, pythonVersion, torchVersion, comfyUIArgs, branch, commitId, releaseTag } = body;
+    
+    // Handle torchVersion - can be string or object with version and indexUrl
+    let torchVersionString: string | undefined;
+    let torchIndexUrl: string | undefined;
+    
+    if (torchVersion) {
+      if (typeof torchVersion === 'string') {
+        torchVersionString = torchVersion;
+      } else if (torchVersion.version) {
+        torchVersionString = torchVersion.version;
+        torchIndexUrl = torchVersion.indexUrl;
+      }
+    }
 
     // Validate inputs
     if (!visibleName || visibleName.length < 2) {
@@ -205,8 +265,81 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const requirementsContent = await readFile(requirementsPath, 'utf-8');
-    const dependencies = parseRequirements(requirementsContent);
+    let requirementsContent = await readFile(requirementsPath, 'utf-8');
+    let dependencies = parseRequirements(requirementsContent);
+
+    // Override torch packages if torchVersion is provided
+    let indexUrlComment: string | undefined;
+    if (torchVersionString) {
+      // If indexUrl not provided, try to extract from version string
+      if (!torchIndexUrl && torchVersionString.includes('+')) {
+        const cudaMatch = torchVersionString.match(/cu(\d+)/);
+        if (cudaMatch) {
+          torchIndexUrl = `https://download.pytorch.org/whl/${cudaMatch[0]}`;
+        }
+      }
+      
+      const overrideResult = overrideTorchPackages(dependencies, torchVersionString, torchIndexUrl);
+      dependencies = overrideResult.dependencies;
+      indexUrlComment = overrideResult.indexUrlComment;
+      
+      // Rebuild requirements.txt content while preserving structure
+      const lines = requirementsContent.split('\n');
+      const newLines: string[] = [];
+      const torchPackages = ['torch', 'torchsde', 'torchvision', 'torchaudio'];
+      let torchPackagesAdded = false;
+      
+      // Add index URL comment for CUDA at the top if needed
+      if (indexUrlComment) {
+        newLines.push(indexUrlComment);
+        newLines.push('');
+      }
+      
+      // Process each line
+      for (const line of lines) {
+        const trimmed = line.trim();
+        
+        // Keep comments and empty lines as-is
+        if (!trimmed || trimmed.startsWith('#')) {
+          newLines.push(line);
+          continue;
+        }
+        
+        // Check if this is a torch package
+        const packageName = trimmed.split(/[=<>!~#]/)[0].trim().toLowerCase();
+        const isTorchPackage = torchPackages.some(torchPkg => packageName === torchPkg);
+        
+        if (isTorchPackage) {
+          // Skip original torch packages - we'll add them at the end
+          continue;
+        } else {
+          // Keep non-torch packages
+          newLines.push(line);
+        }
+      }
+      
+      // Add torch packages at the end (or after first non-comment section)
+      // Find a good insertion point (after first block of dependencies)
+      let insertIndex = newLines.length;
+      for (let i = 0; i < newLines.length; i++) {
+        const line = newLines[i].trim();
+        if (line && !line.startsWith('#')) {
+          // Found first dependency, insert torch packages here
+          insertIndex = i;
+          break;
+        }
+      }
+      
+      // Insert torch packages
+      const torchDeps = overrideResult.dependencies.filter(dep => {
+        const packageName = dep.split(/[=<>!~]/)[0].trim().toLowerCase();
+        return torchPackages.some(torchPkg => packageName === torchPkg);
+      });
+      
+      newLines.splice(insertIndex, 0, ...torchDeps);
+      
+      requirementsContent = newLines.join('\n');
+    }
 
     // Copy requirements.txt to space
     const spaceRequirementsPath = join(spacePath, 'requirements.txt');
@@ -220,6 +353,9 @@ export async function POST(request: NextRequest) {
         visibleName: visibleName,
         spaceId: finalSpaceId,
         pythonVersion: pythonVersion || '3.11',
+        torchVersion: torchVersionString || null,
+        torchIndexUrl: torchIndexUrl || null,
+        comfyUIArgs: comfyUIArgs || null,
         githubUrl: githubUrl,
         branch: branch || null,
         commitId: commitId || null,

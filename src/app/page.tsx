@@ -57,6 +57,7 @@ export default function Home() {
   const [spaceToDuplicate, setSpaceToDuplicate] = useState<SpaceInfo | null>(null);
   const [newDuplicateSpaceName, setNewDuplicateSpaceName] = useState('');
   const [isDuplicating, setIsDuplicating] = useState(false);
+  const [deviceInfo, setDeviceInfo] = useState<{ device: string; gpuName: string; cudaVersion: string } | null>(null);
 
   useEffect(() => {
     // Fetch spaces on component mount
@@ -74,6 +75,22 @@ export default function Home() {
           color: 'red',
           icon: <RiErrorWarningLine size={18} />,
           autoClose: 5000,
+        });
+      });
+
+    // Fetch device info on component mount
+    fetch('/api/device-info')
+      .then(res => res.json())
+      .then((data: { device: string; gpuName: string; cudaVersion: string }) => {
+        setDeviceInfo(data);
+      })
+      .catch(err => {
+        console.error('Error fetching device info:', err);
+        // Set default values on error
+        setDeviceInfo({
+          device: 'CPU',
+          gpuName: 'NA',
+          cudaVersion: 'NA',
         });
       });
   }, []);
@@ -649,6 +666,43 @@ export default function Home() {
                 Beta
               </Badge>
             </Group>
+            {deviceInfo && (
+              <Group gap="md" mt="xs" mb="md">
+                <Badge
+                  size="sm"
+                  variant="outline"
+                  style={{
+                    borderColor: '#555555',
+                    color: '#888888',
+                    backgroundColor: 'transparent',
+                  }}
+                >
+                  Device: {deviceInfo.device}
+                </Badge>
+                <Badge
+                  size="sm"
+                  variant="outline"
+                  style={{
+                    borderColor: '#555555',
+                    color: '#888888',
+                    backgroundColor: 'transparent',
+                  }}
+                >
+                  GPU: {deviceInfo.gpuName}
+                </Badge>
+                <Badge
+                  size="sm"
+                  variant="outline"
+                  style={{
+                    borderColor: '#555555',
+                    color: '#888888',
+                    backgroundColor: 'transparent',
+                  }}
+                >
+                  CUDA Version: {deviceInfo.cudaVersion}
+                </Badge>
+              </Group>
+            )}
             <Group gap="xs" mt="md">
               <Paper
                 p="sm"
