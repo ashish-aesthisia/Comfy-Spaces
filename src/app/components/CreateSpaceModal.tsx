@@ -136,7 +136,8 @@ export default function CreateSpaceModal({ opened, onClose, onSuccess }: CreateS
           torchVersion: data.torchVersion || null,
           loading: false,
         });
-        setTorchVersion((current) => current || getDefaultTorchVersion(data.cudaVersion || null));
+        const autoTorchVersion = data.torchVersion || getDefaultTorchVersion(data.cudaVersion || null);
+        setTorchVersion((current) => (current && current !== 'latest' ? current : autoTorchVersion));
       })
       .catch(() => {
         if (cancelled) return;
@@ -567,17 +568,20 @@ export default function CreateSpaceModal({ opened, onClose, onSuccess }: CreateS
                     <Text
                       size="xs"
                       fw={600}
-                      c="#888888"
+                      c="#4dabf7"
                       style={{
-                        border: '1px solid #373a40',
+                        border: '1px solid #2b3a55',
                         padding: '6px 8px',
                         borderRadius: '6px',
                         whiteSpace: 'nowrap',
-                        backgroundColor: '#1a1b1e',
+                        backgroundColor: '#1b2230',
                         lineHeight: 1,
+                        maxWidth: '140px',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
                       }}
                     >
-                      {gpuInfo.torchVersion}
+                      Current: {gpuInfo.torchVersion}
                     </Text>
                   )}
                   <div style={{ flex: 1, minWidth: 0 }}>
