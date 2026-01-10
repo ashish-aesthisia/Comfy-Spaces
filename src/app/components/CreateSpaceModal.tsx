@@ -21,9 +21,6 @@ export default function CreateSpaceModal({ opened, onClose, onSuccess }: CreateS
   const [visibleName, setVisibleName] = useState('');
   const [githubUrl, setGithubUrl] = useState('https://github.com/comfyanonymous/ComfyUI');
   const [pythonVersion, setPythonVersion] = useState('3.11');
-  const [torchVersion, setTorchVersion] = useState<string | null>(null);
-  const [torchVersions, setTorchVersions] = useState<{ cpu: Array<{ version: string; label: string; type: string }>; cuda: Array<{ version: string; label: string; type: string; indexUrl?: string }> } | null>(null);
-  const [loadingTorchVersions, setLoadingTorchVersions] = useState(false);
   const [comfyUIArgs, setComfyUIArgs] = useState('');
   const [branch, setBranch] = useState('');
   const [commitId, setCommitId] = useState('');
@@ -64,13 +61,6 @@ export default function CreateSpaceModal({ opened, onClose, onSuccess }: CreateS
     }
   }, [opened, githubUrl]);
 
-  // Fetch torch versions when modal opens
-  useEffect(() => {
-    if (opened) {
-      fetchTorchVersions();
-    }
-  }, [opened]);
-
   const fetchReleases = async () => {
     setLoadingReleases(true);
     setError(null);
@@ -93,22 +83,6 @@ export default function CreateSpaceModal({ opened, onClose, onSuccess }: CreateS
     }
   };
 
-  const fetchTorchVersions = async () => {
-    setLoadingTorchVersions(true);
-    try {
-      const response = await fetch('/api/torch-versions');
-      const data = await response.json();
-      
-      if (response.ok) {
-        setTorchVersions(data);
-      }
-    } catch (err) {
-      console.error('Error fetching torch versions:', err);
-    } finally {
-      setLoadingTorchVersions(false);
-    }
-  };
-
   const handleCreate = async () => {
     // Validate visible name
     if (!visibleName || visibleName.length < 2) {
@@ -127,21 +101,6 @@ export default function CreateSpaceModal({ opened, onClose, onSuccess }: CreateS
     setSuccess(false);
 
     try {
-      // Get torch version info including indexUrl if CUDA
-      let torchVersionInfo: { version: string; indexUrl?: string } | undefined;
-      if (torchVersion && torchVersions) {
-        const allVersions = [...torchVersions.cpu, ...torchVersions.cuda];
-        const selectedTorch = allVersions.find(v => v.version === torchVersion);
-        if (selectedTorch && 'indexUrl' in selectedTorch && selectedTorch.indexUrl) {
-          torchVersionInfo = {
-            version: torchVersion,
-            indexUrl: selectedTorch.indexUrl,
-          };
-        } else {
-          torchVersionInfo = { version: torchVersion };
-        }
-      }
-
       const response = await fetch('/api/spaces/create-from-github', {
         method: 'POST',
         headers: {
@@ -152,7 +111,6 @@ export default function CreateSpaceModal({ opened, onClose, onSuccess }: CreateS
           spaceId: generateSpaceId(visibleName),
           githubUrl,
           pythonVersion,
-          torchVersion: torchVersionInfo,
           comfyUIArgs: comfyUIArgs.trim() || undefined,
           branch: branch || undefined,
           commitId: commitId || undefined,
@@ -184,7 +142,6 @@ export default function CreateSpaceModal({ opened, onClose, onSuccess }: CreateS
     if (!creating) {
       setVisibleName('');
       setPythonVersion('3.11');
-      setTorchVersion(null);
       setComfyUIArgs('');
       setBranch('');
       setCommitId('');
@@ -316,37 +273,6 @@ export default function CreateSpaceModal({ opened, onClose, onSuccess }: CreateS
                 '&[dataHovered]': { backgroundColor: '#2c2e33' },
               },
             }}
-          />
-
-          <Select
-            label="Torch Version (Optional)"
-            placeholder={loadingTorchVersions ? 'Loading versions...' : 'Select torch version to override'}
-            data={torchVersions ? [
-              ...torchVersions.cpu.map(v => ({ value: v.version, label: v.label })),
-              ...torchVersions.cuda.map(v => ({ value: v.version, label: v.label })),
-            ] : []}
-            value={torchVersion}
-            onChange={(value) => setTorchVersion(value)}
-            disabled={creating || loadingTorchVersions}
-            searchable
-            clearable
-            styles={{
-              label: { color: '#ffffff', marginBottom: '6px', fontWeight: 500 },
-              input: { 
-                backgroundColor: '#25262b', 
-                border: '1px solid #373a40', 
-                color: '#ffffff',
-                '&:focus': { borderColor: '#0070f3' },
-              },
-              dropdown: { backgroundColor: '#25262b', border: '1px solid #373a40' },
-              option: { 
-                backgroundColor: '#25262b',
-                color: '#ffffff',
-                '&[dataSelected]': { backgroundColor: '#373a40' },
-                '&[dataHovered]': { backgroundColor: '#2c2e33' },
-              },
-            }}
-            description="If selected, will override torch, torchvision, torchaudio, and torchsde in requirements.txt"
           />
 
           <TextInput
