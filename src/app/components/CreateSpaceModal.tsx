@@ -21,6 +21,8 @@ export default function CreateSpaceModal({ opened, onClose, onSuccess }: CreateS
   const [visibleName, setVisibleName] = useState('');
   const [githubUrl, setGithubUrl] = useState('https://github.com/comfyanonymous/ComfyUI');
   const [pythonVersion, setPythonVersion] = useState('3.11');
+  const [pythonVersions, setPythonVersions] = useState<Array<{ value: string; label: string }>>([]);
+  const [loadingPythonVersions, setLoadingPythonVersions] = useState(false);
   const [comfyUIArgs, setComfyUIArgs] = useState('');
   const [branch, setBranch] = useState('');
   const [commitId, setCommitId] = useState('');
@@ -44,15 +46,12 @@ export default function CreateSpaceModal({ opened, onClose, onSuccess }: CreateS
       .replace(/^-|-$/g, ''); // Remove leading/trailing dashes
   };
 
-  // Common Python versions
-  const pythonVersions = [
-    { value: '3.8', label: 'Python 3.8' },
-    { value: '3.9', label: 'Python 3.9' },
-    { value: '3.10', label: 'Python 3.10' },
-    { value: '3.11', label: 'Python 3.11' },
-    { value: '3.12', label: 'Python 3.12' },
-    { value: '3.13', label: 'Python 3.13' },
-  ];
+  // Fetch Python versions when modal opens
+  useEffect(() => {
+    if (opened) {
+      fetchPythonVersions();
+    }
+  }, [opened]);
 
   // Fetch releases when modal opens
   useEffect(() => {
@@ -60,6 +59,47 @@ export default function CreateSpaceModal({ opened, onClose, onSuccess }: CreateS
       fetchReleases();
     }
   }, [opened, githubUrl]);
+
+  const fetchPythonVersions = async () => {
+    setLoadingPythonVersions(true);
+    try {
+      const response = await fetch('/api/python-versions');
+      const data = await response.json();
+      
+      if (response.ok && data.versions && data.versions.length > 0) {
+        setPythonVersions(data.versions);
+        // Set default to first available version if current selection is not available
+        if (!data.versions.some((v: { value: string }) => v.value === pythonVersion)) {
+          setPythonVersion(data.versions[0].value);
+        }
+      } else {
+        // Fallback to common versions if API fails
+        const fallbackVersions = [
+          { value: '3.13', label: 'Python 3.13' },
+          { value: '3.12', label: 'Python 3.12' },
+          { value: '3.11', label: 'Python 3.11' },
+          { value: '3.10', label: 'Python 3.10' },
+          { value: '3.9', label: 'Python 3.9' },
+          { value: '3.8', label: 'Python 3.8' },
+        ];
+        setPythonVersions(fallbackVersions);
+      }
+    } catch (err) {
+      console.error('Error fetching Python versions:', err);
+      // Fallback to common versions on error
+      const fallbackVersions = [
+        { value: '3.13', label: 'Python 3.13' },
+        { value: '3.12', label: 'Python 3.12' },
+        { value: '3.11', label: 'Python 3.11' },
+        { value: '3.10', label: 'Python 3.10' },
+        { value: '3.9', label: 'Python 3.9' },
+        { value: '3.8', label: 'Python 3.8' },
+      ];
+      setPythonVersions(fallbackVersions);
+    } finally {
+      setLoadingPythonVersions(false);
+    }
+  };
 
   const fetchReleases = async () => {
     setLoadingReleases(true);
@@ -251,12 +291,13 @@ export default function CreateSpaceModal({ opened, onClose, onSuccess }: CreateS
 
           <Select
             label="Python Version"
-            placeholder="Select Python version"
+            placeholder={loadingPythonVersions ? 'Detecting Python versions...' : 'Select Python version'}
             data={pythonVersions}
             value={pythonVersion}
             onChange={(value) => value && setPythonVersion(value)}
             required
-            disabled={creating}
+            disabled={creating || loadingPythonVersions}
+            rightSection={loadingPythonVersions ? <Loader size="xs" /> : undefined}
             styles={{
               label: { color: '#ffffff', marginBottom: '6px', fontWeight: 500 },
               input: { 
@@ -273,6 +314,7 @@ export default function CreateSpaceModal({ opened, onClose, onSuccess }: CreateS
                 '&[dataHovered]': { backgroundColor: '#2c2e33' },
               },
             }}
+            description={loadingPythonVersions ? 'Detecting available Python versions...' : pythonVersions.length > 0 ? `${pythonVersions.length} version${pythonVersions.length !== 1 ? 's' : ''} available` : undefined}
           />
 
           <TextInput
