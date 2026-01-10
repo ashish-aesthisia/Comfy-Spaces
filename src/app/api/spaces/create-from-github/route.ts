@@ -115,10 +115,182 @@ function generateSpaceId(visibleName: string): string {
     .replace(/^-|-$/g, ''); // Remove leading/trailing dashes
 }
 
+async function detectCudaFamily(): Promise<string | null> {
+  return new Promise((resolve) => {
+    const childProcess = spawn('nvidia-smi', [], {
+      env: { ...process.env },
+      shell: false,
+    });
+
+    let output = '';
+    let errorOutput = '';
+
+    childProcess.stdout?.on('data', (data) => {
+      output += data.toString();
+    });
+
+    childProcess.stderr?.on('data', (data) => {
+      errorOutput += data.toString();
+    });
+
+    childProcess.on('close', () => {
+      // Match CUDA Version: X.Y pattern
+      const match = output.match(/CUDA Version:\s+(\d+)\.(\d+)/);
+      if (match) {
+        const major = match[1];
+        resolve(`${major}.x`);
+      } else {
+        resolve(null);
+      }
+    });
+
+    childProcess.on('error', () => {
+      resolve(null);
+    });
+  });
+}
+
+async function getTorchRequirements(): Promise<string> {
+  const cudaFamily = await detectCudaFamily();
+
+  if (cudaFamily === '11.x') {
+    return `--extra-index-url https://download.pytorch.org/whl/cu118
+torch
+torchvision
+torchaudio`;
+  }
+
+  if (cudaFamily === '12.x') {
+    return `--extra-index-url https://download.pytorch.org/whl/cu130
+torch
+torchvision
+torchaudio`;
+  }
+
+  // CPU fallback - no version constraints, let pip resolve compatible versions
+  return `torch
+torchvision
+torchaudio`;
+}
+
+function overrideTorchPackages(
+  dependencies: string[],
+  torchRequirements: string
+): string[] {
+  // Packages to override
+  const torchPackages = ['torch', 'torchsde', 'torchvision', 'torchaudio'];
+  
+  // Remove existing torch packages
+  const filteredDeps = dependencies.filter(dep => {
+    const packageName = dep.split(/[=<>!~]/)[0].trim().toLowerCase();
+    return !torchPackages.some(torchPkg => packageName === torchPkg);
+  });
+  
+  // Parse torch requirements
+  const torchLines = torchRequirements.split('\n').map(line => line.trim()).filter(line => line);
+  const torchDeps: string[] = [];
+  let extraIndexUrl: string | undefined;
+  let isGpu = false;
+  
+  // First, check if there's an extra-index-url (indicates GPU/CUDA)
+  for (const line of torchLines) {
+    if (line.startsWith('--extra-index-url')) {
+      const urlMatch = line.match(/--extra-index-url\s+(.+)/);
+      if (urlMatch) {
+        extraIndexUrl = urlMatch[1];
+        isGpu = true;
+      }
+    }
+  }
+  
+  // Now process packages
+  for (const line of torchLines) {
+    if (line.startsWith('--extra-index-url')) {
+      // Skip extra-index-url line, we'll add it separately
+      continue;
+    } else {
+      // It's a package requirement
+      // For GPU (when extraIndexUrl is present), remove version constraints
+      if (isGpu) {
+        // Remove version constraint (==, >=, <=, etc.) for GPU packages
+        const packageName = line.split(/[=<>!~]/)[0].trim();
+        torchDeps.push(packageName);
+      } else {
+        // For CPU, keep the version constraint
+        torchDeps.push(line);
+      }
+    }
+  }
+  
+  // Add torchsde (doesn't have CUDA builds, use without version constraint)
+  torchDeps.push('torchsde');
+  
+  // Insert torch packages at the beginning
+  filteredDeps.unshift(...torchDeps);
+  
+  return filteredDeps;
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { visibleName, spaceId, githubUrl, pythonVersion, branch, commitId, releaseTag } = body;
+    const { visibleName, spaceId, githubUrl, comfyUIArgs, branch, commitId, releaseTag } = body;
+    
+    // Auto-detect Python version
+    let pythonVersion = '3.11'; // Default fallback
+    try {
+      const { spawn } = require('child_process');
+      const pythonCommands = ['python', 'python3'];
+      
+      for (const cmd of pythonCommands) {
+        try {
+          const version = await new Promise<string | null>((resolve) => {
+            const childProcess = spawn(cmd, ['--version'], {
+              env: { ...process.env },
+              shell: false,
+            });
+            
+            let output = '';
+            let errorOutput = '';
+            
+            childProcess.stdout?.on('data', (data: Buffer) => {
+              output += data.toString();
+            });
+            
+            childProcess.stderr?.on('data', (data: Buffer) => {
+              errorOutput += data.toString();
+            });
+            
+            childProcess.on('close', (code: number | null) => {
+              if (code === 0) {
+                const versionMatch = (output || errorOutput).match(/Python\s+(\d+\.\d+)/);
+                if (versionMatch) {
+                  resolve(versionMatch[1]);
+                } else {
+                  resolve(null);
+                }
+              } else {
+                resolve(null);
+              }
+            });
+            
+            childProcess.on('error', () => {
+              resolve(null);
+            });
+          });
+          
+          if (version) {
+            pythonVersion = version;
+            break;
+          }
+        } catch {
+          continue;
+        }
+      }
+    } catch (error) {
+      console.error('Error detecting Python version:', error);
+      // Use default
+    }
 
     // Validate inputs
     if (!visibleName || visibleName.length < 2) {
@@ -205,8 +377,83 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const requirementsContent = await readFile(requirementsPath, 'utf-8');
-    const dependencies = parseRequirements(requirementsContent);
+    let requirementsContent = await readFile(requirementsPath, 'utf-8');
+    let dependencies = parseRequirements(requirementsContent);
+
+    // Auto-detect and override torch packages based on CUDA version
+    try {
+      const torchRequirements = await getTorchRequirements();
+      dependencies = overrideTorchPackages(dependencies, torchRequirements);
+      
+      // Rebuild requirements.txt content while preserving structure
+      const lines = requirementsContent.split('\n');
+      const newLines: string[] = [];
+      const torchPackages = ['torch', 'torchsde', 'torchvision', 'torchaudio'];
+      
+      // Check if torch requirements include extra-index-url
+      const torchLines = torchRequirements.split('\n').map(line => line.trim());
+      const extraIndexUrlLine = torchLines.find(line => line.startsWith('--extra-index-url'));
+      
+      // Process each line
+      for (const line of lines) {
+        const trimmed = line.trim();
+        
+        // Keep comments and empty lines as-is
+        if (!trimmed || trimmed.startsWith('#')) {
+          newLines.push(line);
+          continue;
+        }
+        
+        // Check if this is a torch package
+        const packageName = trimmed.split(/[=<>!~#]/)[0].trim().toLowerCase();
+        const isTorchPackage = torchPackages.some(torchPkg => packageName === torchPkg);
+        
+        if (isTorchPackage) {
+          // Skip original torch packages - we'll add them at the end
+          continue;
+        } else {
+          // Keep non-torch packages
+          newLines.push(line);
+        }
+      }
+      
+      // Add extra-index-url if present (before torch packages)
+      if (extraIndexUrlLine) {
+        // Find insertion point (after comments, before first dependency)
+        let insertIndex = newLines.length;
+        for (let i = 0; i < newLines.length; i++) {
+          const line = newLines[i].trim();
+          if (line && !line.startsWith('#')) {
+            insertIndex = i;
+            break;
+          }
+        }
+        newLines.splice(insertIndex, 0, extraIndexUrlLine);
+      }
+      
+      // Add torch packages at the end (or after first non-comment section)
+      let insertIndex = newLines.length;
+      for (let i = 0; i < newLines.length; i++) {
+        const line = newLines[i].trim();
+        if (line && !line.startsWith('#') && !line.startsWith('--extra-index-url')) {
+          insertIndex = i;
+          break;
+        }
+      }
+      
+      // Insert torch packages
+      const torchDeps = dependencies.filter(dep => {
+        const packageName = dep.split(/[=<>!~]/)[0].trim().toLowerCase();
+        return torchPackages.some(torchPkg => packageName === torchPkg);
+      });
+      
+      newLines.splice(insertIndex, 0, ...torchDeps);
+      
+      requirementsContent = newLines.join('\n');
+    } catch (error) {
+      console.error('Error auto-detecting torch requirements:', error);
+      // Continue with original requirements if detection fails
+    }
 
     // Copy requirements.txt to space
     const spaceRequirementsPath = join(spacePath, 'requirements.txt');
@@ -220,6 +467,7 @@ export async function POST(request: NextRequest) {
         visibleName: visibleName,
         spaceId: finalSpaceId,
         pythonVersion: pythonVersion || '3.11',
+        comfyUIArgs: comfyUIArgs || null,
         githubUrl: githubUrl,
         branch: branch || null,
         commitId: commitId || null,

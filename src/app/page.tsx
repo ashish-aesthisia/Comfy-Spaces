@@ -4,7 +4,7 @@ import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { Container, Title, Text, Select, Button, Group, Stack, Paper, ScrollArea, Badge, Menu, ActionIcon, Modal, TextInput, Tooltip, Textarea } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
-import { RiCheckLine, RiErrorWarningLine, RiRefreshLine, RiCheckboxCircleFill, RiCloseLine, RiAddLine, RiFileCodeLine, RiArrowRightLine, RiMoreFill, RiPencilLine, RiDeleteBinLine, RiDownloadLine, RiInformationLine, RiCodeLine, RiHistoryLine, RiFileCopyLine } from 'react-icons/ri';
+import { RiCheckLine, RiErrorWarningLine, RiRefreshLine, RiCheckboxCircleFill, RiCloseLine, RiAddLine, RiFileCodeLine, RiArrowRightLine, RiMoreFill, RiPencilLine, RiDeleteBinLine, RiDownloadLine, RiInformationLine, RiCodeLine, RiHistoryLine, RiFileCopyLine, RiTerminalBoxLine } from 'react-icons/ri';
 import CreateSpaceModal from './components/CreateSpaceModal';
 import ImportJsonModal from './components/ImportJsonModal';
 
@@ -57,6 +57,12 @@ export default function Home() {
   const [spaceToDuplicate, setSpaceToDuplicate] = useState<SpaceInfo | null>(null);
   const [newDuplicateSpaceName, setNewDuplicateSpaceName] = useState('');
   const [isDuplicating, setIsDuplicating] = useState(false);
+  const [editCmdArgsModalOpened, setEditCmdArgsModalOpened] = useState(false);
+  const [spaceToEditCmdArgs, setSpaceToEditCmdArgs] = useState<SpaceInfo | null>(null);
+  const [cmdArgs, setCmdArgs] = useState('');
+  const [isSavingCmdArgs, setIsSavingCmdArgs] = useState(false);
+  const [loadingCmdArgs, setLoadingCmdArgs] = useState(false);
+  const [deviceInfo, setDeviceInfo] = useState<{ device: string; gpuName: string; cudaVersion: string; pythonVersion: string } | null>(null);
 
   useEffect(() => {
     // Fetch spaces on component mount
@@ -74,6 +80,23 @@ export default function Home() {
           color: 'red',
           icon: <RiErrorWarningLine size={18} />,
           autoClose: 5000,
+        });
+      });
+
+    // Fetch device info on component mount
+    fetch('/api/device-info')
+      .then(res => res.json())
+      .then((data: { device: string; gpuName: string; cudaVersion: string; pythonVersion: string }) => {
+        setDeviceInfo(data);
+      })
+      .catch(err => {
+        console.error('Error fetching device info:', err);
+        // Set default values on error
+        setDeviceInfo({
+          device: 'CPU',
+          gpuName: 'NA',
+          cudaVersion: 'NA',
+          pythonVersion: 'NA',
         });
       });
   }, []);
@@ -457,6 +480,83 @@ export default function Home() {
     setRenameModalOpened(true);
   };
 
+  const openEditCmdArgsModal = async (space: SpaceInfo) => {
+    setSpaceToEditCmdArgs(space);
+    setLoadingCmdArgs(true);
+    setEditCmdArgsModalOpened(true);
+    try {
+      // Fetch current comfyUIArgs from space.json
+      const response = await fetch(`/api/spaces/${encodeURIComponent(space.name)}/metadata`);
+      if (response.ok) {
+        const data = await response.json();
+        setCmdArgs(data.comfyUIArgs || '');
+      } else {
+        setCmdArgs('');
+      }
+    } catch (error) {
+      console.error('Error fetching command args:', error);
+      setCmdArgs('');
+    } finally {
+      setLoadingCmdArgs(false);
+    }
+  };
+
+  const handleSaveCmdArgs = async () => {
+    if (!spaceToEditCmdArgs) return;
+
+    setIsSavingCmdArgs(true);
+    try {
+      const response = await fetch(`/api/spaces/${encodeURIComponent(spaceToEditCmdArgs.name)}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ comfyUIArgs: cmdArgs.trim() || null }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        notifications.show({
+          title: 'Save Failed',
+          message: data.error || 'Failed to save command arguments',
+          color: 'red',
+          icon: <RiErrorWarningLine size={18} />,
+          autoClose: 5000,
+        });
+        setIsSavingCmdArgs(false);
+        return;
+      }
+
+      // Refresh spaces list
+      const res = await fetch('/api/spaces');
+      const spacesData: SpacesData = await res.json();
+      setSpaces(spacesData);
+      
+      notifications.show({
+        title: 'Save Successful',
+        message: 'Command arguments updated successfully',
+        color: 'green',
+        icon: <RiCheckLine size={18} />,
+        autoClose: 5000,
+      });
+      setEditCmdArgsModalOpened(false);
+      setSpaceToEditCmdArgs(null);
+      setCmdArgs('');
+    } catch (error) {
+      console.error('Error saving command args:', error);
+      notifications.show({
+        title: 'Save Failed',
+        message: 'Failed to save command arguments',
+        color: 'red',
+        icon: <RiErrorWarningLine size={18} />,
+        autoClose: 5000,
+      });
+    } finally {
+      setIsSavingCmdArgs(false);
+    }
+  };
+
   const openDuplicateModal = (space: SpaceInfo) => {
     setSpaceToDuplicate(space);
     setNewDuplicateSpaceName(`${space.visibleName || space.name} (copy)`);
@@ -649,6 +749,54 @@ export default function Home() {
                 Beta
               </Badge>
             </Group>
+            {deviceInfo && (
+              <Group gap="md" mt="xs" mb="md">
+                <Badge
+                  size="sm"
+                  variant="outline"
+                  style={{
+                    borderColor: '#555555',
+                    color: '#888888',
+                    backgroundColor: 'transparent',
+                  }}
+                >
+                  Python: {deviceInfo.pythonVersion}
+                </Badge>
+                <Badge
+                  size="sm"
+                  variant="outline"
+                  style={{
+                    borderColor: '#555555',
+                    color: '#888888',
+                    backgroundColor: 'transparent',
+                  }}
+                >
+                  Device: {deviceInfo.device}
+                </Badge>
+                <Badge
+                  size="sm"
+                  variant="outline"
+                  style={{
+                    borderColor: '#555555',
+                    color: '#888888',
+                    backgroundColor: 'transparent',
+                  }}
+                >
+                  GPU: {deviceInfo.gpuName}
+                </Badge>
+                <Badge
+                  size="sm"
+                  variant="outline"
+                  style={{
+                    borderColor: '#555555',
+                    color: '#888888',
+                    backgroundColor: 'transparent',
+                  }}
+                >
+                  CUDA Version: {deviceInfo.cudaVersion}
+                </Badge>
+              </Group>
+            )}
             <Group gap="xs" mt="md">
               <Paper
                 p="sm"
@@ -818,6 +966,16 @@ export default function Home() {
                                   }}
                                 >
                                   Rename
+                                </Menu.Item>
+                                <Menu.Item
+                                  leftSection={<RiTerminalBoxLine size={16} />}
+                                  style={{ color: '#ffffff' }}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    openEditCmdArgsModal(space);
+                                  }}
+                                >
+                                  Edit Command Args
                                 </Menu.Item>
                                 <Menu.Item
                                   leftSection={<RiDeleteBinLine size={16} />}
@@ -1425,6 +1583,84 @@ export default function Home() {
             </Paper>
           </Stack>
         )}
+      </Modal>
+
+      <Modal
+        opened={editCmdArgsModalOpened}
+        onClose={() => {
+          setEditCmdArgsModalOpened(false);
+          setSpaceToEditCmdArgs(null);
+          setCmdArgs('');
+        }}
+        title={
+          <Text fw={600} size="lg" c="#ffffff">
+            Edit Command Arguments - {spaceToEditCmdArgs?.visibleName || spaceToEditCmdArgs?.name}
+          </Text>
+        }
+        size="lg"
+        styles={{
+          title: { color: '#ffffff' },
+          content: { backgroundColor: '#1a1b1e' },
+          header: { backgroundColor: '#25262b', borderBottom: '1px solid #373a40' },
+          body: { backgroundColor: '#1a1b1e' }
+        }}
+      >
+        <Stack gap="md">
+          {loadingCmdArgs ? (
+            <Text c="dimmed" ta="center" py="md">Loading current arguments...</Text>
+          ) : (
+            <>
+              {cmdArgs && (
+                <Paper p="sm" style={{ backgroundColor: '#25262b', border: '1px solid #373a40' }}>
+                  <Text size="sm" c="#888888" mb="xs">Current Arguments:</Text>
+                  <Text size="sm" c="#ffffff" style={{ fontFamily: 'monospace' }}>{cmdArgs || '(none)'}</Text>
+                </Paper>
+              )}
+              <TextInput
+                label="ComfyUI Launch Arguments"
+                placeholder="--port 8188 --enable-cors-header"
+                value={cmdArgs}
+                onChange={(e) => setCmdArgs(e.currentTarget.value)}
+                disabled={isSavingCmdArgs}
+                styles={{
+                  label: { color: '#ffffff', marginBottom: '6px', fontWeight: 500 },
+                  input: {
+                    backgroundColor: '#25262b',
+                    border: '1px solid #373a40',
+                    color: '#ffffff',
+                    '&:focus': { borderColor: '#0070f3' },
+                  },
+                  description: { color: '#888888', fontSize: '12px', marginTop: '4px' },
+                }}
+                description="Enter command-line arguments for ComfyUI launch. main.py is added automatically. Leave empty to use default arguments."
+              />
+            </>
+          )}
+          <Group justify="flex-end" mt="md">
+            <Button
+              variant="subtle"
+              onClick={() => {
+                setEditCmdArgsModalOpened(false);
+                setSpaceToEditCmdArgs(null);
+                setCmdArgs('');
+              }}
+              disabled={isSavingCmdArgs}
+              style={{ color: '#888888' }}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSaveCmdArgs}
+              loading={isSavingCmdArgs}
+              style={{
+                backgroundColor: '#0070f3',
+                color: '#ffffff',
+              }}
+            >
+              Save
+            </Button>
+          </Group>
+        </Stack>
       </Modal>
     </div>
   );

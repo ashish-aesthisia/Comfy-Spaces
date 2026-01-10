@@ -1454,12 +1454,34 @@ export async function GET(request: NextRequest) {
         sendLog(controller, encoder, `[APP] Launching ComfyUI server...`, logFilePath);
         
         // Use the venv python to run ComfyUI
-        // Check if there are environment variables for ComfyUI launch command
+        // Priority: 1. space.json metadata comfyUIArgs, 2. Environment variables, 3. Default
         let comfyUIArgs = ['main.py'];
         let useSystemPython = false;
+        let comfyCmdSource = 'default';
         
-        // Check for COMFY_CMD first, then COMFYUI_LAUNCH_ARGS
-        const comfyCmd = process.env.COMFY_CMD || process.env.COMFYUI_LAUNCH_ARGS;
+        // Check space.json for comfyUIArgs first
+        let comfyCmd: string | undefined;
+        try {
+          if (existsSync(spaceJsonPath)) {
+            const spaceJsonContent = readFileSync(spaceJsonPath, 'utf-8');
+            const spaceJson = JSON.parse(spaceJsonContent);
+            if (spaceJson.metadata?.comfyUIArgs) {
+              comfyCmd = spaceJson.metadata.comfyUIArgs;
+              comfyCmdSource = 'space.json';
+            }
+          }
+        } catch (error) {
+          console.error('Error reading space.json for comfyUIArgs:', error);
+        }
+        
+        // Fall back to environment variables if not in space.json
+        if (!comfyCmd) {
+          comfyCmd = process.env.COMFY_CMD || process.env.COMFYUI_LAUNCH_ARGS;
+          if (comfyCmd) {
+            comfyCmdSource = 'environment';
+          }
+        }
+        
         if (comfyCmd) {
           // Parse the command - handle shell redirection like "> ./data/comfy-logs.txt"
           // Note: We ignore log file redirections and always use space/comfy-logs.txt
@@ -1490,10 +1512,15 @@ export async function GET(request: NextRequest) {
             comfyUIArgs = args;
           }
           
-          sendLog(controller, encoder, `[APP] Using custom ComfyUI launch command from environment`, logFilePath);
+          sendLog(controller, encoder, `[APP] Using custom ComfyUI launch command from ${comfyCmdSource}`, logFilePath);
         }
         
-        // Always add --host=0.0.0.0 to allow external access
+        // Ensure main.py is present (add if not already there)
+        if (!comfyUIArgs.includes('main.py')) {
+          comfyUIArgs.unshift('main.py');
+        }
+        
+        // Always add --listen 0.0.0.0 to allow external access if not present
         if (!comfyUIArgs.includes('--listen')) {
           comfyUIArgs.push('--listen', '0.0.0.0');
         }

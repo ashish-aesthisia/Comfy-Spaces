@@ -19,10 +19,13 @@ interface CreateSpaceModalProps {
 
 export default function CreateSpaceModal({ opened, onClose, onSuccess }: CreateSpaceModalProps) {
   const [visibleName, setVisibleName] = useState('');
-  const [githubUrl, setGithubUrl] = useState('https://github.com/comfyanonymous/ComfyUI');
-  const [pythonVersion, setPythonVersion] = useState('3.11');
+  const [githubUrl, setGithubUrl] = useState('https://github.com/Comfy-Org/ComfyUI');
+  const [comfyUIArgs, setComfyUIArgs] = useState('');
   const [branch, setBranch] = useState('');
   const [commitId, setCommitId] = useState('');
+  
+  // Default ComfyUI launch args
+  const defaultComfyUIArgs = '--listen 0.0.0.0';
   const [selectedRelease, setSelectedRelease] = useState<string | null>(null);
   const [releases, setReleases] = useState<Release[]>([]);
   const [loadingReleases, setLoadingReleases] = useState(false);
@@ -39,16 +42,6 @@ export default function CreateSpaceModal({ opened, onClose, onSuccess }: CreateS
       .replace(/-+/g, '-') // Replace multiple dashes with single dash
       .replace(/^-|-$/g, ''); // Remove leading/trailing dashes
   };
-
-  // Common Python versions
-  const pythonVersions = [
-    { value: '3.8', label: 'Python 3.8' },
-    { value: '3.9', label: 'Python 3.9' },
-    { value: '3.10', label: 'Python 3.10' },
-    { value: '3.11', label: 'Python 3.11' },
-    { value: '3.12', label: 'Python 3.12' },
-    { value: '3.13', label: 'Python 3.13' },
-  ];
 
   // Fetch releases when modal opens
   useEffect(() => {
@@ -106,7 +99,7 @@ export default function CreateSpaceModal({ opened, onClose, onSuccess }: CreateS
           visibleName,
           spaceId: generateSpaceId(visibleName),
           githubUrl,
-          pythonVersion,
+          comfyUIArgs: comfyUIArgs.trim() || undefined,
           branch: branch || undefined,
           commitId: commitId || undefined,
           releaseTag: selectedRelease || undefined,
@@ -136,7 +129,7 @@ export default function CreateSpaceModal({ opened, onClose, onSuccess }: CreateS
   const handleClose = () => {
     if (!creating) {
       setVisibleName('');
-      setPythonVersion('3.11');
+      setComfyUIArgs('');
       setBranch('');
       setCommitId('');
       setSelectedRelease(null);
@@ -224,7 +217,7 @@ export default function CreateSpaceModal({ opened, onClose, onSuccess }: CreateS
 
           <TextInput
             label="ComfyUI GitHub URL"
-            placeholder="https://github.com/comfyanonymous/ComfyUI"
+            placeholder="https://github.com/Comfy-Org/ComfyUI"
             value={githubUrl}
             onChange={(e) => {
               setGithubUrl(e.target.value);
@@ -243,13 +236,11 @@ export default function CreateSpaceModal({ opened, onClose, onSuccess }: CreateS
             }}
           />
 
-          <Select
-            label="Python Version"
-            placeholder="Select Python version"
-            data={pythonVersions}
-            value={pythonVersion}
-            onChange={(value) => value && setPythonVersion(value)}
-            required
+          <TextInput
+            label="ComfyUI Launch Arguments (Optional)"
+            placeholder={defaultComfyUIArgs}
+            value={comfyUIArgs}
+            onChange={(e) => setComfyUIArgs(e.currentTarget.value)}
             disabled={creating}
             styles={{
               label: { color: '#ffffff', marginBottom: '6px', fontWeight: 500 },
@@ -259,14 +250,9 @@ export default function CreateSpaceModal({ opened, onClose, onSuccess }: CreateS
                 color: '#ffffff',
                 '&:focus': { borderColor: '#0070f3' },
               },
-              dropdown: { backgroundColor: '#25262b', border: '1px solid #373a40' },
-              option: { 
-                backgroundColor: '#25262b',
-                color: '#ffffff',
-                '&[dataSelected]': { backgroundColor: '#373a40' },
-                '&[dataHovered]': { backgroundColor: '#2c2e33' },
-              },
+              description: { color: '#888888', fontSize: '12px', marginTop: '4px' },
             }}
+            description={`Default: main.py ${defaultComfyUIArgs}. Only specify arguments (main.py will be added automatically). Examples: --port 8189, --enable-cors-header, --disable-xformers`}
           />
         </Stack>
 
