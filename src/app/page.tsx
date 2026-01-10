@@ -61,6 +61,7 @@ export default function Home() {
   const [spaceToEditCmdArgs, setSpaceToEditCmdArgs] = useState<SpaceInfo | null>(null);
   const [cmdArgs, setCmdArgs] = useState('');
   const [isSavingCmdArgs, setIsSavingCmdArgs] = useState(false);
+  const [loadingCmdArgs, setLoadingCmdArgs] = useState(false);
   const [deviceInfo, setDeviceInfo] = useState<{ device: string; gpuName: string; cudaVersion: string; pythonVersion: string } | null>(null);
 
   useEffect(() => {
@@ -481,6 +482,8 @@ export default function Home() {
 
   const openEditCmdArgsModal = async (space: SpaceInfo) => {
     setSpaceToEditCmdArgs(space);
+    setLoadingCmdArgs(true);
+    setEditCmdArgsModalOpened(true);
     try {
       // Fetch current comfyUIArgs from space.json
       const response = await fetch(`/api/spaces/${encodeURIComponent(space.name)}/metadata`);
@@ -493,8 +496,9 @@ export default function Home() {
     } catch (error) {
       console.error('Error fetching command args:', error);
       setCmdArgs('');
+    } finally {
+      setLoadingCmdArgs(false);
     }
-    setEditCmdArgsModalOpened(true);
   };
 
   const handleSaveCmdArgs = async () => {
@@ -1602,24 +1606,36 @@ export default function Home() {
         }}
       >
         <Stack gap="md">
-          <TextInput
-            label="ComfyUI Launch Arguments"
-            placeholder="--port 8188 --enable-cors-header"
-            value={cmdArgs}
-            onChange={(e) => setCmdArgs(e.currentTarget.value)}
-            disabled={isSavingCmdArgs}
-            styles={{
-              label: { color: '#ffffff', marginBottom: '6px', fontWeight: 500 },
-              input: {
-                backgroundColor: '#25262b',
-                border: '1px solid #373a40',
-                color: '#ffffff',
-                '&:focus': { borderColor: '#0070f3' },
-              },
-              description: { color: '#888888', fontSize: '12px', marginTop: '4px' },
-            }}
-            description="Enter command-line arguments for ComfyUI launch. main.py is added automatically. Leave empty to use default arguments."
-          />
+          {loadingCmdArgs ? (
+            <Text c="dimmed" ta="center" py="md">Loading current arguments...</Text>
+          ) : (
+            <>
+              {cmdArgs && (
+                <Paper p="sm" style={{ backgroundColor: '#25262b', border: '1px solid #373a40' }}>
+                  <Text size="sm" c="#888888" mb="xs">Current Arguments:</Text>
+                  <Text size="sm" c="#ffffff" style={{ fontFamily: 'monospace' }}>{cmdArgs || '(none)'}</Text>
+                </Paper>
+              )}
+              <TextInput
+                label="ComfyUI Launch Arguments"
+                placeholder="--port 8188 --enable-cors-header"
+                value={cmdArgs}
+                onChange={(e) => setCmdArgs(e.currentTarget.value)}
+                disabled={isSavingCmdArgs}
+                styles={{
+                  label: { color: '#ffffff', marginBottom: '6px', fontWeight: 500 },
+                  input: {
+                    backgroundColor: '#25262b',
+                    border: '1px solid #373a40',
+                    color: '#ffffff',
+                    '&:focus': { borderColor: '#0070f3' },
+                  },
+                  description: { color: '#888888', fontSize: '12px', marginTop: '4px' },
+                }}
+                description="Enter command-line arguments for ComfyUI launch. main.py is added automatically. Leave empty to use default arguments."
+              />
+            </>
+          )}
           <Group justify="flex-end" mt="md">
             <Button
               variant="subtle"
