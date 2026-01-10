@@ -19,7 +19,7 @@ interface CreateSpaceModalProps {
 
 export default function CreateSpaceModal({ opened, onClose, onSuccess }: CreateSpaceModalProps) {
   const [visibleName, setVisibleName] = useState('');
-  const [githubUrl, setGithubUrl] = useState('https://github.com/comfyanonymous/ComfyUI');
+  const [githubUrl, setGithubUrl] = useState('https://github.com/Comfy-Org/ComfyUI');
   const [comfyUIArgs, setComfyUIArgs] = useState('');
   const [branch, setBranch] = useState('');
   const [commitId, setCommitId] = useState('');
@@ -217,7 +217,7 @@ export default function CreateSpaceModal({ opened, onClose, onSuccess }: CreateS
 
           <TextInput
             label="ComfyUI GitHub URL"
-            placeholder="https://github.com/comfyanonymous/ComfyUI"
+            placeholder="https://github.com/Comfy-Org/ComfyUI"
             value={githubUrl}
             onChange={(e) => {
               setGithubUrl(e.target.value);
