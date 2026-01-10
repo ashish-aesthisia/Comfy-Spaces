@@ -154,23 +154,23 @@ async function getTorchRequirements(): Promise<string> {
   const cudaFamily = await detectCudaFamily();
 
   if (cudaFamily === '11.x') {
-    return `--index-url https://download.pytorch.org/whl/cu118
-torch==2.9.1+cu118
-torchvision==0.19.1+cu118
-torchaudio==2.9.1+cu118`;
+    return `--extra-index-url https://download.pytorch.org/whl/cu118
+torch
+torchvision
+torchaudio`;
   }
 
   if (cudaFamily === '12.x') {
-    return `--index-url https://download.pytorch.org/whl/cu121
-torch==2.8.0+cu121
-torchvision==0.18.0+cu121
-torchaudio==2.8.0+cu121`;
+    return `--extra-index-url https://download.pytorch.org/whl/cu130
+torch
+torchvision
+torchaudio`;
   }
 
-  // CPU fallback
-  return `torch==2.9.1
-torchvision==0.19.1
-torchaudio==2.9.1`;
+  // CPU fallback - no version constraints, let pip resolve compatible versions
+  return `torch
+torchvision
+torchaudio`;
 }
 
 function overrideTorchPackages(
@@ -189,15 +189,15 @@ function overrideTorchPackages(
   // Parse torch requirements
   const torchLines = torchRequirements.split('\n').map(line => line.trim()).filter(line => line);
   const torchDeps: string[] = [];
-  let indexUrl: string | undefined;
+  let extraIndexUrl: string | undefined;
   let isGpu = false;
   
-  // First, check if there's an index-url (indicates GPU/CUDA)
+  // First, check if there's an extra-index-url (indicates GPU/CUDA)
   for (const line of torchLines) {
-    if (line.startsWith('--index-url')) {
-      const urlMatch = line.match(/--index-url\s+(.+)/);
+    if (line.startsWith('--extra-index-url')) {
+      const urlMatch = line.match(/--extra-index-url\s+(.+)/);
       if (urlMatch) {
-        indexUrl = urlMatch[1];
+        extraIndexUrl = urlMatch[1];
         isGpu = true;
       }
     }
@@ -205,12 +205,12 @@ function overrideTorchPackages(
   
   // Now process packages
   for (const line of torchLines) {
-    if (line.startsWith('--index-url')) {
-      // Skip index-url line, we'll add it separately
+    if (line.startsWith('--extra-index-url')) {
+      // Skip extra-index-url line, we'll add it separately
       continue;
     } else {
       // It's a package requirement
-      // For GPU (when indexUrl is present), remove version constraints
+      // For GPU (when extraIndexUrl is present), remove version constraints
       if (isGpu) {
         // Remove version constraint (==, >=, <=, etc.) for GPU packages
         const packageName = line.split(/[=<>!~]/)[0].trim();
@@ -390,9 +390,9 @@ export async function POST(request: NextRequest) {
       const newLines: string[] = [];
       const torchPackages = ['torch', 'torchsde', 'torchvision', 'torchaudio'];
       
-      // Check if torch requirements include index-url
+      // Check if torch requirements include extra-index-url
       const torchLines = torchRequirements.split('\n').map(line => line.trim());
-      const indexUrlLine = torchLines.find(line => line.startsWith('--index-url'));
+      const extraIndexUrlLine = torchLines.find(line => line.startsWith('--extra-index-url'));
       
       // Process each line
       for (const line of lines) {
@@ -417,8 +417,8 @@ export async function POST(request: NextRequest) {
         }
       }
       
-      // Add index-url if present (before torch packages)
-      if (indexUrlLine) {
+      // Add extra-index-url if present (before torch packages)
+      if (extraIndexUrlLine) {
         // Find insertion point (after comments, before first dependency)
         let insertIndex = newLines.length;
         for (let i = 0; i < newLines.length; i++) {
@@ -428,14 +428,14 @@ export async function POST(request: NextRequest) {
             break;
           }
         }
-        newLines.splice(insertIndex, 0, indexUrlLine);
+        newLines.splice(insertIndex, 0, extraIndexUrlLine);
       }
       
       // Add torch packages at the end (or after first non-comment section)
       let insertIndex = newLines.length;
       for (let i = 0; i < newLines.length; i++) {
         const line = newLines[i].trim();
-        if (line && !line.startsWith('#') && !line.startsWith('--index-url')) {
+        if (line && !line.startsWith('#') && !line.startsWith('--extra-index-url')) {
           insertIndex = i;
           break;
         }
