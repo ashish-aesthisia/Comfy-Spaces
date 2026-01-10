@@ -5,6 +5,7 @@ interface DeviceInfo {
   device: string; // CPU or GPU
   gpuName: string; // GPU name or "NA"
   cudaVersion: string; // CUDA version or "NA"
+  pythonVersion: string; // Python version or "NA"
 }
 
 function runCommand(command: string, args: string[]): Promise<string> {
@@ -39,10 +40,35 @@ function runCommand(command: string, args: string[]): Promise<string> {
   });
 }
 
+async function getPythonVersion(): Promise<string> {
+  // Try python first, then python3
+  const commands = ['python', 'python3'];
+  
+  for (const command of commands) {
+    try {
+      const output = await runCommand(command, ['--version']);
+      // Output format: "Python 3.11.5" or "Python 3.11.5\n"
+      const versionMatch = output.match(/Python\s+(\d+\.\d+\.\d+)/);
+      if (versionMatch) {
+        return versionMatch[1];
+      }
+    } catch (error) {
+      // Continue to next command
+      continue;
+    }
+  }
+  
+  return 'NA';
+}
+
 async function getDeviceInfo(): Promise<DeviceInfo> {
   let device = 'CPU';
   let gpuName = 'NA';
   let cudaVersion = 'NA';
+  let pythonVersion = 'NA';
+
+  // Get Python version
+  pythonVersion = await getPythonVersion();
 
   // Check for GPU using nvidia-smi
   try {
@@ -80,6 +106,7 @@ async function getDeviceInfo(): Promise<DeviceInfo> {
     device,
     gpuName,
     cudaVersion,
+    pythonVersion,
   };
 }
 
@@ -94,6 +121,7 @@ export async function GET() {
       device: 'CPU',
       gpuName: 'NA',
       cudaVersion: 'NA',
+      pythonVersion: 'NA',
     });
   }
 }

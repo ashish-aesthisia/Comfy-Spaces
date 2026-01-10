@@ -216,7 +216,63 @@ function overrideTorchPackages(
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { visibleName, spaceId, githubUrl, pythonVersion, comfyUIArgs, branch, commitId, releaseTag } = body;
+    const { visibleName, spaceId, githubUrl, comfyUIArgs, branch, commitId, releaseTag } = body;
+    
+    // Auto-detect Python version
+    let pythonVersion = '3.11'; // Default fallback
+    try {
+      const { spawn } = require('child_process');
+      const pythonCommands = ['python', 'python3'];
+      
+      for (const cmd of pythonCommands) {
+        try {
+          const version = await new Promise<string | null>((resolve) => {
+            const childProcess = spawn(cmd, ['--version'], {
+              env: { ...process.env },
+              shell: false,
+            });
+            
+            let output = '';
+            let errorOutput = '';
+            
+            childProcess.stdout?.on('data', (data: Buffer) => {
+              output += data.toString();
+            });
+            
+            childProcess.stderr?.on('data', (data: Buffer) => {
+              errorOutput += data.toString();
+            });
+            
+            childProcess.on('close', (code: number | null) => {
+              if (code === 0) {
+                const versionMatch = (output || errorOutput).match(/Python\s+(\d+\.\d+)/);
+                if (versionMatch) {
+                  resolve(versionMatch[1]);
+                } else {
+                  resolve(null);
+                }
+              } else {
+                resolve(null);
+              }
+            });
+            
+            childProcess.on('error', () => {
+              resolve(null);
+            });
+          });
+          
+          if (version) {
+            pythonVersion = version;
+            break;
+          }
+        } catch {
+          continue;
+        }
+      }
+    } catch (error) {
+      console.error('Error detecting Python version:', error);
+      // Use default
+    }
 
     // Validate inputs
     if (!visibleName || visibleName.length < 2) {

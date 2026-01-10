@@ -20,9 +20,6 @@ interface CreateSpaceModalProps {
 export default function CreateSpaceModal({ opened, onClose, onSuccess }: CreateSpaceModalProps) {
   const [visibleName, setVisibleName] = useState('');
   const [githubUrl, setGithubUrl] = useState('https://github.com/comfyanonymous/ComfyUI');
-  const [pythonVersion, setPythonVersion] = useState('3.11');
-  const [pythonVersions, setPythonVersions] = useState<Array<{ value: string; label: string }>>([]);
-  const [loadingPythonVersions, setLoadingPythonVersions] = useState(false);
   const [comfyUIArgs, setComfyUIArgs] = useState('');
   const [branch, setBranch] = useState('');
   const [commitId, setCommitId] = useState('');
@@ -46,60 +43,12 @@ export default function CreateSpaceModal({ opened, onClose, onSuccess }: CreateS
       .replace(/^-|-$/g, ''); // Remove leading/trailing dashes
   };
 
-  // Fetch Python versions when modal opens
-  useEffect(() => {
-    if (opened) {
-      fetchPythonVersions();
-    }
-  }, [opened]);
-
   // Fetch releases when modal opens
   useEffect(() => {
     if (opened && githubUrl) {
       fetchReleases();
     }
   }, [opened, githubUrl]);
-
-  const fetchPythonVersions = async () => {
-    setLoadingPythonVersions(true);
-    try {
-      const response = await fetch('/api/python-versions');
-      const data = await response.json();
-      
-      if (response.ok && data.versions && data.versions.length > 0) {
-        setPythonVersions(data.versions);
-        // Set default to first available version if current selection is not available
-        if (!data.versions.some((v: { value: string }) => v.value === pythonVersion)) {
-          setPythonVersion(data.versions[0].value);
-        }
-      } else {
-        // Fallback to common versions if API fails
-        const fallbackVersions = [
-          { value: '3.13', label: 'Python 3.13' },
-          { value: '3.12', label: 'Python 3.12' },
-          { value: '3.11', label: 'Python 3.11' },
-          { value: '3.10', label: 'Python 3.10' },
-          { value: '3.9', label: 'Python 3.9' },
-          { value: '3.8', label: 'Python 3.8' },
-        ];
-        setPythonVersions(fallbackVersions);
-      }
-    } catch (err) {
-      console.error('Error fetching Python versions:', err);
-      // Fallback to common versions on error
-      const fallbackVersions = [
-        { value: '3.13', label: 'Python 3.13' },
-        { value: '3.12', label: 'Python 3.12' },
-        { value: '3.11', label: 'Python 3.11' },
-        { value: '3.10', label: 'Python 3.10' },
-        { value: '3.9', label: 'Python 3.9' },
-        { value: '3.8', label: 'Python 3.8' },
-      ];
-      setPythonVersions(fallbackVersions);
-    } finally {
-      setLoadingPythonVersions(false);
-    }
-  };
 
   const fetchReleases = async () => {
     setLoadingReleases(true);
@@ -150,7 +99,6 @@ export default function CreateSpaceModal({ opened, onClose, onSuccess }: CreateS
           visibleName,
           spaceId: generateSpaceId(visibleName),
           githubUrl,
-          pythonVersion,
           comfyUIArgs: comfyUIArgs.trim() || undefined,
           branch: branch || undefined,
           commitId: commitId || undefined,
@@ -181,7 +129,6 @@ export default function CreateSpaceModal({ opened, onClose, onSuccess }: CreateS
   const handleClose = () => {
     if (!creating) {
       setVisibleName('');
-      setPythonVersion('3.11');
       setComfyUIArgs('');
       setBranch('');
       setCommitId('');
@@ -287,34 +234,6 @@ export default function CreateSpaceModal({ opened, onClose, onSuccess }: CreateS
                 '&:focus': { borderColor: '#0070f3' },
               },
             }}
-          />
-
-          <Select
-            label="Python Version"
-            placeholder={loadingPythonVersions ? 'Detecting Python versions...' : 'Select Python version'}
-            data={pythonVersions}
-            value={pythonVersion}
-            onChange={(value) => value && setPythonVersion(value)}
-            required
-            disabled={creating || loadingPythonVersions}
-            rightSection={loadingPythonVersions ? <Loader size="xs" /> : undefined}
-            styles={{
-              label: { color: '#ffffff', marginBottom: '6px', fontWeight: 500 },
-              input: { 
-                backgroundColor: '#25262b', 
-                border: '1px solid #373a40', 
-                color: '#ffffff',
-                '&:focus': { borderColor: '#0070f3' },
-              },
-              dropdown: { backgroundColor: '#25262b', border: '1px solid #373a40' },
-              option: { 
-                backgroundColor: '#25262b',
-                color: '#ffffff',
-                '&[dataSelected]': { backgroundColor: '#373a40' },
-                '&[dataHovered]': { backgroundColor: '#2c2e33' },
-              },
-            }}
-            description={loadingPythonVersions ? 'Detecting available Python versions...' : pythonVersions.length > 0 ? `${pythonVersions.length} version${pythonVersions.length !== 1 ? 's' : ''} available` : undefined}
           />
 
           <TextInput

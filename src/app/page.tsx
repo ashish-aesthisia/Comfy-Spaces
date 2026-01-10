@@ -57,7 +57,7 @@ export default function Home() {
   const [spaceToDuplicate, setSpaceToDuplicate] = useState<SpaceInfo | null>(null);
   const [newDuplicateSpaceName, setNewDuplicateSpaceName] = useState('');
   const [isDuplicating, setIsDuplicating] = useState(false);
-  const [deviceInfo, setDeviceInfo] = useState<{ device: string; gpuName: string; cudaVersion: string } | null>(null);
+  const [deviceInfo, setDeviceInfo] = useState<{ device: string; gpuName: string; cudaVersion: string; pythonVersion: string } | null>(null);
 
   useEffect(() => {
     // Fetch spaces on component mount
@@ -81,7 +81,7 @@ export default function Home() {
     // Fetch device info on component mount
     fetch('/api/device-info')
       .then(res => res.json())
-      .then((data: { device: string; gpuName: string; cudaVersion: string }) => {
+      .then((data: { device: string; gpuName: string; cudaVersion: string; pythonVersion: string }) => {
         setDeviceInfo(data);
       })
       .catch(err => {
@@ -91,6 +91,7 @@ export default function Home() {
           device: 'CPU',
           gpuName: 'NA',
           cudaVersion: 'NA',
+          pythonVersion: 'NA',
         });
       });
   }, []);
@@ -668,6 +669,17 @@ export default function Home() {
             </Group>
             {deviceInfo && (
               <Group gap="md" mt="xs" mb="md">
+                <Badge
+                  size="sm"
+                  variant="outline"
+                  style={{
+                    borderColor: '#555555',
+                    color: '#888888',
+                    backgroundColor: 'transparent',
+                  }}
+                >
+                  Python: {deviceInfo.pythonVersion}
+                </Badge>
                 <Badge
                   size="sm"
                   variant="outline"
