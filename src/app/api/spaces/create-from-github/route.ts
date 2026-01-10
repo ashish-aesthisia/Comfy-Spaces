@@ -190,17 +190,35 @@ function overrideTorchPackages(
   const torchLines = torchRequirements.split('\n').map(line => line.trim()).filter(line => line);
   const torchDeps: string[] = [];
   let indexUrl: string | undefined;
+  let isGpu = false;
   
+  // First, check if there's an index-url (indicates GPU/CUDA)
   for (const line of torchLines) {
     if (line.startsWith('--index-url')) {
-      // Extract index URL
       const urlMatch = line.match(/--index-url\s+(.+)/);
       if (urlMatch) {
         indexUrl = urlMatch[1];
+        isGpu = true;
       }
+    }
+  }
+  
+  // Now process packages
+  for (const line of torchLines) {
+    if (line.startsWith('--index-url')) {
+      // Skip index-url line, we'll add it separately
+      continue;
     } else {
       // It's a package requirement
-      torchDeps.push(line);
+      // For GPU (when indexUrl is present), remove version constraints
+      if (isGpu) {
+        // Remove version constraint (==, >=, <=, etc.) for GPU packages
+        const packageName = line.split(/[=<>!~]/)[0].trim();
+        torchDeps.push(packageName);
+      } else {
+        // For CPU, keep the version constraint
+        torchDeps.push(line);
+      }
     }
   }
   

@@ -1515,7 +1515,12 @@ export async function GET(request: NextRequest) {
           sendLog(controller, encoder, `[APP] Using custom ComfyUI launch command from ${comfyCmdSource}`, logFilePath);
         }
         
-        // Always add --host=0.0.0.0 to allow external access
+        // Ensure main.py is present (add if not already there)
+        if (!comfyUIArgs.includes('main.py')) {
+          comfyUIArgs.unshift('main.py');
+        }
+        
+        // Always add --listen 0.0.0.0 to allow external access if not present
         if (!comfyUIArgs.includes('--listen')) {
           comfyUIArgs.push('--listen', '0.0.0.0');
         }

@@ -25,7 +25,7 @@ export default function CreateSpaceModal({ opened, onClose, onSuccess }: CreateS
   const [commitId, setCommitId] = useState('');
   
   // Default ComfyUI launch args
-  const defaultComfyUIArgs = 'main.py --listen 0.0.0.0';
+  const defaultComfyUIArgs = '--listen 0.0.0.0';
   const [selectedRelease, setSelectedRelease] = useState<string | null>(null);
   const [releases, setReleases] = useState<Release[]>([]);
   const [loadingReleases, setLoadingReleases] = useState(false);
@@ -252,7 +252,7 @@ export default function CreateSpaceModal({ opened, onClose, onSuccess }: CreateS
               },
               description: { color: '#888888', fontSize: '12px', marginTop: '4px' },
             }}
-            description={`Default: ${defaultComfyUIArgs}. Override to customize launch arguments (e.g., --port, --enable-cors-header, --disable-xformers)`}
+            description={`Default: main.py ${defaultComfyUIArgs}. Only specify arguments (main.py will be added automatically). Examples: --port 8189, --enable-cors-header, --disable-xformers`}
           />
         </Stack>
 
