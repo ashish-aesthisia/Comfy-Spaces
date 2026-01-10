@@ -935,7 +935,7 @@ export default function Home() {
                                     openUpdatePackagesModal(space);
                                   }}
                                 >
-                                  Update Packages
+                                  View/Modify Packages
                                 </Menu.Item>
                                 <Menu.Item
                                   leftSection={<RiHistoryLine size={16} />}
@@ -1348,7 +1348,7 @@ export default function Home() {
         }}
         title={
           <Text fw={600} size="lg" c="#ffffff">
-            Update Packages - {spaceToUpdate?.visibleName || spaceToUpdate?.name}
+            View/Modify Packages - {spaceToUpdate?.visibleName || spaceToUpdate?.name}
           </Text>
         }
         size="xl"
