@@ -60,6 +60,7 @@ export default function Home() {
   const [editCmdArgsModalOpened, setEditCmdArgsModalOpened] = useState(false);
   const [spaceToEditCmdArgs, setSpaceToEditCmdArgs] = useState<SpaceInfo | null>(null);
   const [cmdArgs, setCmdArgs] = useState('');
+  const [currentCmdArgs, setCurrentCmdArgs] = useState<string | null>(null);
   const [isSavingCmdArgs, setIsSavingCmdArgs] = useState(false);
   const [loadingCmdArgs, setLoadingCmdArgs] = useState(false);
   const [deviceInfo, setDeviceInfo] = useState<{ device: string; gpuName: string; cudaVersion: string; pythonVersion: string } | null>(null);
@@ -489,12 +490,16 @@ export default function Home() {
       const response = await fetch(`/api/spaces/${encodeURIComponent(space.name)}/metadata`);
       if (response.ok) {
         const data = await response.json();
-        setCmdArgs(data.comfyUIArgs || '');
+        const currentArgs = data.comfyUIArgs || null;
+        setCurrentCmdArgs(currentArgs);
+        setCmdArgs(currentArgs || '');
       } else {
+        setCurrentCmdArgs(null);
         setCmdArgs('');
       }
     } catch (error) {
       console.error('Error fetching command args:', error);
+      setCurrentCmdArgs(null);
       setCmdArgs('');
     } finally {
       setLoadingCmdArgs(false);
@@ -528,21 +533,22 @@ export default function Home() {
         return;
       }
 
-      // Refresh spaces list
-      const res = await fetch('/api/spaces');
-      const spacesData: SpacesData = await res.json();
-      setSpaces(spacesData);
+      // Update current args to reflect what was saved
+      setCurrentCmdArgs(cmdArgs.trim() || null);
       
       notifications.show({
         title: 'Save Successful',
-        message: 'Command arguments updated successfully',
+        message: 'Command arguments saved to space.json',
         color: 'green',
         icon: <RiCheckLine size={18} />,
         autoClose: 5000,
       });
+      
+      // Close the modal
       setEditCmdArgsModalOpened(false);
       setSpaceToEditCmdArgs(null);
       setCmdArgs('');
+      setCurrentCmdArgs(null);
     } catch (error) {
       console.error('Error saving command args:', error);
       notifications.show({
@@ -935,7 +941,7 @@ export default function Home() {
                                     openUpdatePackagesModal(space);
                                   }}
                                 >
-                                  View/Modify Packages
+                                  Modify requirements.txt
                                 </Menu.Item>
                                 <Menu.Item
                                   leftSection={<RiHistoryLine size={16} />}
@@ -1348,7 +1354,7 @@ export default function Home() {
         }}
         title={
           <Text fw={600} size="lg" c="#ffffff">
-            View/Modify Packages - {spaceToUpdate?.visibleName || spaceToUpdate?.name}
+            Modify requirements.txt - {spaceToUpdate?.visibleName || spaceToUpdate?.name}
           </Text>
         }
         size="xl"
@@ -1591,6 +1597,7 @@ export default function Home() {
           setEditCmdArgsModalOpened(false);
           setSpaceToEditCmdArgs(null);
           setCmdArgs('');
+          setCurrentCmdArgs(null);
         }}
         title={
           <Text fw={600} size="lg" c="#ffffff">
@@ -1610,10 +1617,12 @@ export default function Home() {
             <Text c="dimmed" ta="center" py="md">Loading current arguments...</Text>
           ) : (
             <>
-              {cmdArgs && (
+              {currentCmdArgs && (
                 <Paper p="sm" style={{ backgroundColor: '#25262b', border: '1px solid #373a40' }}>
-                  <Text size="sm" c="#888888" mb="xs">Current Arguments:</Text>
-                  <Text size="sm" c="#ffffff" style={{ fontFamily: 'monospace' }}>{cmdArgs || '(none)'}</Text>
+                  <Text size="sm" c="#888888" mb="xs" fw={500}>Current Arguments (saved in space.json):</Text>
+                  <Text size="sm" c="#ffffff" style={{ fontFamily: 'monospace', wordBreak: 'break-all' }}>
+                    {currentCmdArgs || '(none)'}
+                  </Text>
                 </Paper>
               )}
               <TextInput
@@ -1643,8 +1652,9 @@ export default function Home() {
                 setEditCmdArgsModalOpened(false);
                 setSpaceToEditCmdArgs(null);
                 setCmdArgs('');
+                setCurrentCmdArgs(null);
               }}
-              disabled={isSavingCmdArgs}
+              disabled={isSavingCmdArgs || loadingCmdArgs}
               style={{ color: '#888888' }}
             >
               Cancel
@@ -1652,6 +1662,7 @@ export default function Home() {
             <Button
               onClick={handleSaveCmdArgs}
               loading={isSavingCmdArgs}
+              disabled={loadingCmdArgs}
               style={{
                 backgroundColor: '#0070f3',
                 color: '#ffffff',
