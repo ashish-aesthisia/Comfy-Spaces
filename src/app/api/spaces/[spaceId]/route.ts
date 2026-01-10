@@ -80,14 +80,7 @@ export async function PUT(
     }
 
     const body = await request.json();
-    const { visibleName } = body;
-
-    if (!visibleName || typeof visibleName !== 'string' || visibleName.trim() === '') {
-      return NextResponse.json(
-        { error: 'visibleName is required and must be a non-empty string' },
-        { status: 400 }
-      );
-    }
+    const { visibleName, comfyUIArgs } = body;
 
     const spacesPath = join(process.cwd(), 'spaces');
     const spaceJsonPath = join(spacesPath, spaceId, 'space.json');
@@ -103,19 +96,39 @@ export async function PUT(
     const spaceJsonContent = await readFile(spaceJsonPath, 'utf-8');
     const spaceJson = JSON.parse(spaceJsonContent);
 
-    // Update visibleName in metadata
+    // Update metadata
     if (!spaceJson.metadata) {
       spaceJson.metadata = {};
     }
-    spaceJson.metadata.visibleName = visibleName.trim();
+    
+    // Update visibleName if provided
+    if (visibleName !== undefined) {
+      if (typeof visibleName !== 'string' || visibleName.trim() === '') {
+        return NextResponse.json(
+          { error: 'visibleName must be a non-empty string' },
+          { status: 400 }
+        );
+      }
+      spaceJson.metadata.visibleName = visibleName.trim();
+    }
+    
+    // Update comfyUIArgs if provided
+    if (comfyUIArgs !== undefined) {
+      spaceJson.metadata.comfyUIArgs = comfyUIArgs && typeof comfyUIArgs === 'string' && comfyUIArgs.trim() ? comfyUIArgs.trim() : null;
+    }
 
     // Write updated space.json
     await writeFile(spaceJsonPath, JSON.stringify(spaceJson, null, 2), 'utf-8');
 
+    const message = visibleName !== undefined 
+      ? `Space renamed to "${visibleName.trim()}" successfully`
+      : 'Command arguments updated successfully';
+
     return NextResponse.json({ 
       success: true,
-      message: `Space renamed to "${visibleName}" successfully`,
-      visibleName: visibleName.trim()
+      message,
+      visibleName: spaceJson.metadata.visibleName,
+      comfyUIArgs: spaceJson.metadata.comfyUIArgs
     });
   } catch (error) {
     console.error('Error renaming space:', error);
