@@ -362,23 +362,43 @@ async function ensurePip(
 }
 
 // Helper function to get device info (GPU/CPU and CUDA version)
-async function getDeviceInfo(): Promise<{ device: string; cudaVersion: string }> {
+async function getDeviceInfo(
+  controller?: ReadableStreamDefaultController,
+  encoder?: TextEncoder,
+  logFile?: string
+): Promise<{ device: string; cudaVersion: string }> {
   let device = 'CPU';
   let cudaVersion = 'NA';
 
+  const log = (message: string) => {
+    if (controller && encoder) {
+      sendLog(controller, encoder, message, logFile);
+    } else {
+      console.log(`[DEVICE-INFO] ${message}`);
+    }
+  };
+
+  log(`[DEVICE-INFO] Starting device detection...`);
+  
   // Check for GPU using nvidia-smi
+  log(`[DEVICE-INFO] Checking for GPU using nvidia-smi...`);
   try {
     const nvidiaSmiOutput = await getVersion('nvidia-smi', ['--query-gpu=name', '--format=csv,noheader'], process.cwd(), process.env);
     if (nvidiaSmiOutput && nvidiaSmiOutput.trim()) {
       device = 'GPU';
+      log(`[DEVICE-INFO] GPU detected via nvidia-smi: ${nvidiaSmiOutput.trim().split('\n')[0]}`);
+    } else {
+      log(`[DEVICE-INFO] nvidia-smi returned empty output, assuming CPU`);
     }
-  } catch (error) {
+  } catch (error: any) {
     // nvidia-smi not available or failed, assume CPU
+    log(`[DEVICE-INFO] nvidia-smi not available or failed: ${error.message}, assuming CPU`);
     device = 'CPU';
   }
 
   // Get CUDA version using nvcc
   if (device === 'GPU') {
+    log(`[DEVICE-INFO] GPU detected, checking CUDA version using nvcc...`);
     try {
       const nvccOutput = await getVersion('nvcc', ['--version'], process.cwd(), process.env);
       // nvcc --version output format:
@@ -389,20 +409,43 @@ async function getDeviceInfo(): Promise<{ device: string; cudaVersion: string }>
       const versionMatch = nvccOutput.match(/release\s+(\d+\.\d+)/i);
       if (versionMatch) {
         cudaVersion = versionMatch[1];
+        log(`[DEVICE-INFO] CUDA version detected: ${cudaVersion}`);
+      } else {
+        log(`[DEVICE-INFO] Could not parse CUDA version from nvcc output`);
       }
-    } catch (error) {
+    } catch (error: any) {
       // nvcc not available or failed
+      log(`[DEVICE-INFO] nvcc not available or failed: ${error.message}, CUDA version unknown`);
       cudaVersion = 'NA';
     }
+  } else {
+    log(`[DEVICE-INFO] CPU device, skipping CUDA version check`);
   }
 
+  log(`[DEVICE-INFO] Device detection complete: device=${device}, cudaVersion=${cudaVersion}`);
   return { device, cudaVersion };
 }
 
 // Helper function to get torch index URL based on CUDA version
-function getTorchIndexUrl(cudaVersion: string): string | null {
+function getTorchIndexUrl(
+  cudaVersion: string,
+  controller?: ReadableStreamDefaultController,
+  encoder?: TextEncoder,
+  logFile?: string
+): string | null {
+  const log = (message: string) => {
+    if (controller && encoder) {
+      sendLog(controller, encoder, message, logFile);
+    } else {
+      console.log(`[TORCH-URL] ${message}`);
+    }
+  };
+
+  log(`[TORCH-URL] Determining PyTorch index URL for CUDA version: ${cudaVersion}`);
+  
   if (cudaVersion === 'NA') {
     // Default to CUDA 12.4 if version cannot be determined
+    log(`[TORCH-URL] CUDA version unknown, defaulting to CUDA 12.4 index URL`);
     return 'https://download.pytorch.org/whl/cu124';
   }
 
@@ -416,26 +459,36 @@ function getTorchIndexUrl(cudaVersion: string): string | null {
     '11.8': 'cu118',
   };
 
+  log(`[TORCH-URL] Checking for exact CUDA version match: ${cudaVersion}`);
   // Try exact match first
   if (cudaVersionMap[cudaVersion]) {
-    return `https://download.pytorch.org/whl/${cudaVersionMap[cudaVersion]}`;
+    const url = `https://download.pytorch.org/whl/${cudaVersionMap[cudaVersion]}`;
+    log(`[TORCH-URL] Found exact match, using: ${url}`);
+    return url;
   }
 
   // Try to match major.minor (e.g., 12.4.x -> 12.4)
   const majorMinor = cudaVersion.split('.').slice(0, 2).join('.');
+  log(`[TORCH-URL] Trying major.minor match: ${majorMinor}`);
   if (cudaVersionMap[majorMinor]) {
-    return `https://download.pytorch.org/whl/${cudaVersionMap[majorMinor]}`;
+    const url = `https://download.pytorch.org/whl/${cudaVersionMap[majorMinor]}`;
+    log(`[TORCH-URL] Found major.minor match, using: ${url}`);
+    return url;
   }
 
   // Default to CUDA 12.4 for newer versions, or 11.8 for older
   const major = parseInt(cudaVersion.split('.')[0]);
+  log(`[TORCH-URL] Using major version fallback: CUDA ${major}.x`);
   if (major >= 12) {
+    log(`[TORCH-URL] CUDA ${major}.x >= 12, using CUDA 12.4 index URL`);
     return 'https://download.pytorch.org/whl/cu124';
   } else if (major >= 11) {
+    log(`[TORCH-URL] CUDA ${major}.x >= 11, using CUDA 11.8 index URL`);
     return 'https://download.pytorch.org/whl/cu118';
   }
 
   // Fallback to CUDA 12.4
+  log(`[TORCH-URL] Using final fallback: CUDA 12.4 index URL`);
   return 'https://download.pytorch.org/whl/cu124';
 }
 
@@ -1271,33 +1324,103 @@ export async function GET(request: NextRequest) {
         let requirementsPath: string | null = null;
         if (existsSync(spaceJsonPath)) {
           try {
+            sendLog(controller, encoder, `[APP] Reading space.json dependencies...`, logFilePath);
             const spaceJsonContent = readFileSync(spaceJsonPath, 'utf-8');
             const spaceJson = JSON.parse(spaceJsonContent);
             const dependencies = spaceJson.dependencies || [];
+            sendLog(controller, encoder, `[APP] Found ${dependencies.length} dependencies in space.json`, logFilePath);
             
-            if (dependencies.length > 0) {
-              // Check device type and add GPU torch index URL if needed
-              let requirementsContent = dependencies.map((dep: string) => dep).join('\n');
-              
+            // Check device type and add GPU torch index URL if needed
+            let requirementsContent = dependencies.length > 0 
+              ? dependencies.map((dep: string) => dep).join('\n')
+              : '';
+            
+            sendLog(controller, encoder, `[APP] Checking for existing --extra-index-url in dependencies...`, logFilePath);
+            // Check if --extra-index-url is already present in the content
+            let hasExtraIndexUrl = requirementsContent.includes('--extra-index-url');
+            
+            if (hasExtraIndexUrl) {
+              sendLog(controller, encoder, `[APP] --extra-index-url found in space.json dependencies`, logFilePath);
+            } else {
+              sendLog(controller, encoder, `[APP] --extra-index-url not found in space.json dependencies`, logFilePath);
+            }
+            
+            // Also check if there's an existing requirements.txt with the index URL
+            const existingRequirementsPath = join(spacePath, 'requirements.txt');
+            sendLog(controller, encoder, `[APP] Checking for existing requirements.txt file at ${existingRequirementsPath}...`, logFilePath);
+            if (!hasExtraIndexUrl && existsSync(existingRequirementsPath)) {
+              sendLog(controller, encoder, `[APP] requirements.txt file exists, checking for --extra-index-url...`, logFilePath);
               try {
-                const deviceInfo = await getDeviceInfo();
-                if (deviceInfo.device === 'GPU') {
-                  const torchIndexUrl = getTorchIndexUrl(deviceInfo.cudaVersion);
+                const existingContent = readFileSync(existingRequirementsPath, 'utf-8');
+                if (existingContent.includes('--extra-index-url')) {
+                  hasExtraIndexUrl = true;
+                  sendLog(controller, encoder, `[APP] --extra-index-url found in existing requirements.txt`, logFilePath);
+                  // Extract the index URL from existing file if content is empty
+                  if (!requirementsContent) {
+                    const indexUrlMatch = existingContent.match(/--extra-index-url\s+(\S+)/);
+                    if (indexUrlMatch) {
+                      requirementsContent = `--extra-index-url ${indexUrlMatch[1]}`;
+                      sendLog(controller, encoder, `[APP] Extracted index URL from requirements.txt: ${indexUrlMatch[1]}`, logFilePath);
+                    }
+                  }
+                } else {
+                  sendLog(controller, encoder, `[APP] --extra-index-url not found in existing requirements.txt`, logFilePath);
+                }
+              } catch (error: any) {
+                sendLog(controller, encoder, `[WARN] Error reading existing requirements.txt: ${error.message}`, logFilePath);
+              }
+            } else if (!existsSync(existingRequirementsPath)) {
+              sendLog(controller, encoder, `[APP] requirements.txt file does not exist`, logFilePath);
+            }
+            
+            sendLog(controller, encoder, `[APP] Starting device detection for GPU torch index URL...`, logFilePath);
+            try {
+              const deviceInfo = await getDeviceInfo(controller, encoder, logFilePath);
+              sendLog(controller, encoder, `[APP] Device detection complete: device=${deviceInfo.device}, cudaVersion=${deviceInfo.cudaVersion}`, logFilePath);
+              
+              if (deviceInfo.device === 'GPU') {
+                sendLog(controller, encoder, `[APP] GPU detected, determining PyTorch CUDA index URL...`, logFilePath);
+                
+                if (!hasExtraIndexUrl) {
+                  sendLog(controller, encoder, `[APP] Index URL not present, will add it for GPU support`, logFilePath);
+                  const torchIndexUrl = getTorchIndexUrl(deviceInfo.cudaVersion, controller, encoder, logFilePath);
+                  sendLog(controller, encoder, `[APP] Determined PyTorch index URL: ${torchIndexUrl} (for CUDA ${deviceInfo.cudaVersion})`, logFilePath);
+                  
                   if (torchIndexUrl) {
                     // Add --extra-index-url directive at the top of requirements file
                     // This allows pip to download CUDA-compiled torch packages
-                    requirementsContent = `--extra-index-url ${torchIndexUrl}\n${requirementsContent}`;
-                    sendLog(controller, encoder, `[APP] GPU detected (CUDA ${deviceInfo.cudaVersion}). Adding PyTorch CUDA index URL: ${torchIndexUrl}`, logFilePath);
+                    if (requirementsContent) {
+                      requirementsContent = `--extra-index-url ${torchIndexUrl}\n${requirementsContent}`;
+                      sendLog(controller, encoder, `[APP] Added --extra-index-url to top of requirements (${dependencies.length} dependencies)`, logFilePath);
+                    } else {
+                      requirementsContent = `--extra-index-url ${torchIndexUrl}`;
+                      sendLog(controller, encoder, `[APP] Created requirements with only --extra-index-url (no dependencies yet)`, logFilePath);
+                    }
+                    sendLog(controller, encoder, `[APP] GPU detected (CUDA ${deviceInfo.cudaVersion}). Added PyTorch CUDA index URL: ${torchIndexUrl}`, logFilePath);
+                  } else {
+                    sendLog(controller, encoder, `[WARN] Could not determine PyTorch index URL for CUDA ${deviceInfo.cudaVersion}`, logFilePath);
                   }
+                } else {
+                  sendLog(controller, encoder, `[APP] GPU detected (CUDA ${deviceInfo.cudaVersion}). PyTorch CUDA index URL already present in requirements.`, logFilePath);
                 }
-              } catch (error: any) {
-                sendLog(controller, encoder, `[WARN] Could not detect device info: ${error.message}. Continuing without GPU torch index URL.`, logFilePath);
+              } else {
+                sendLog(controller, encoder, `[APP] CPU device detected, skipping GPU torch index URL`, logFilePath);
               }
-              
+            } catch (error: any) {
+              sendLog(controller, encoder, `[WARN] Could not detect device info: ${error.message}. Continuing without GPU torch index URL.`, logFilePath);
+            }
+            
+            if (requirementsContent) {
               // Create temporary requirements.txt from space.json dependencies
               const tempRequirementsPath = join(spacePath, 'requirements_temp.txt');
+              sendLog(controller, encoder, `[APP] Writing requirements to temporary file: ${tempRequirementsPath}`, logFilePath);
               writeFileSync(tempRequirementsPath, requirementsContent, 'utf-8');
               requirementsPath = tempRequirementsPath;
+              
+              // Log summary of requirements content
+              const lines = requirementsContent.split('\n').filter((l: string) => l.trim());
+              const hasIndexUrl = requirementsContent.includes('--extra-index-url');
+              sendLog(controller, encoder, `[APP] Requirements file prepared: ${lines.length} lines, --extra-index-url=${hasIndexUrl ? 'YES' : 'NO'}`, logFilePath);
               
               sendLog(controller, encoder, `[APP] Installing dependencies from space.json...`, logFilePath);
               
