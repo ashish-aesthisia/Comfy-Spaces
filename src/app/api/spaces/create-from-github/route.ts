@@ -455,9 +455,35 @@ export async function POST(request: NextRequest) {
       // Continue with original requirements if detection fails
     }
 
+    // Always add --extra-index-url for PyTorch CUDA at the top
+    const pytorchIndexUrl = '--extra-index-url https://download.pytorch.org/whl/cu129';
+    
+    // Check if index URL is already present
+    if (!requirementsContent.includes('--extra-index-url')) {
+      // Add at the very top of the file
+      requirementsContent = `${pytorchIndexUrl}\n${requirementsContent}`;
+    } else {
+      // If it exists, ensure it's at the top by removing existing ones and adding at top
+      const lines = requirementsContent.split('\n');
+      const filteredLines = lines.filter(line => !line.trim().startsWith('--extra-index-url'));
+      requirementsContent = `${pytorchIndexUrl}\n${filteredLines.join('\n')}`;
+    }
+
     // Copy requirements.txt to space
     const spaceRequirementsPath = join(spacePath, 'requirements.txt');
     await writeFile(spaceRequirementsPath, requirementsContent, 'utf-8');
+
+    // Ensure --extra-index-url is in dependencies array (at the beginning)
+    const hasIndexUrlInDeps = dependencies.some((dep: string) => dep.includes('--extra-index-url'));
+    
+    if (!hasIndexUrlInDeps) {
+      // Add at the beginning of dependencies array
+      dependencies.unshift(pytorchIndexUrl);
+    } else {
+      // Remove existing index URLs and add the correct one at the beginning
+      dependencies = dependencies.filter((dep: string) => !dep.includes('--extra-index-url'));
+      dependencies.unshift(pytorchIndexUrl);
+    }
 
     // Create space.json with nodes, dependencies, and metadata
     const spaceJson = {
