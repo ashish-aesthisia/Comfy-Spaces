@@ -361,6 +361,84 @@ async function ensurePip(
   }
 }
 
+// Helper function to get device info (GPU/CPU and CUDA version)
+async function getDeviceInfo(): Promise<{ device: string; cudaVersion: string }> {
+  let device = 'CPU';
+  let cudaVersion = 'NA';
+
+  // Check for GPU using nvidia-smi
+  try {
+    const nvidiaSmiOutput = await getVersion('nvidia-smi', ['--query-gpu=name', '--format=csv,noheader'], process.cwd(), process.env);
+    if (nvidiaSmiOutput && nvidiaSmiOutput.trim()) {
+      device = 'GPU';
+    }
+  } catch (error) {
+    // nvidia-smi not available or failed, assume CPU
+    device = 'CPU';
+  }
+
+  // Get CUDA version using nvcc
+  if (device === 'GPU') {
+    try {
+      const nvccOutput = await getVersion('nvcc', ['--version'], process.cwd(), process.env);
+      // nvcc --version output format:
+      // nvcc: NVIDIA (R) Cuda compiler driver
+      // Copyright (c) 2005-2024 NVIDIA Corporation
+      // Built on ...
+      // Cuda compilation tools, release 12.4, V12.4.xxx
+      const versionMatch = nvccOutput.match(/release\s+(\d+\.\d+)/i);
+      if (versionMatch) {
+        cudaVersion = versionMatch[1];
+      }
+    } catch (error) {
+      // nvcc not available or failed
+      cudaVersion = 'NA';
+    }
+  }
+
+  return { device, cudaVersion };
+}
+
+// Helper function to get torch index URL based on CUDA version
+function getTorchIndexUrl(cudaVersion: string): string | null {
+  if (cudaVersion === 'NA') {
+    // Default to CUDA 12.4 if version cannot be determined
+    return 'https://download.pytorch.org/whl/cu124';
+  }
+
+  // Map CUDA versions to torch index URLs
+  // CUDA 12.4 -> cu124
+  // CUDA 12.1 -> cu121
+  // CUDA 11.8 -> cu118
+  const cudaVersionMap: { [key: string]: string } = {
+    '12.4': 'cu124',
+    '12.1': 'cu121',
+    '11.8': 'cu118',
+  };
+
+  // Try exact match first
+  if (cudaVersionMap[cudaVersion]) {
+    return `https://download.pytorch.org/whl/${cudaVersionMap[cudaVersion]}`;
+  }
+
+  // Try to match major.minor (e.g., 12.4.x -> 12.4)
+  const majorMinor = cudaVersion.split('.').slice(0, 2).join('.');
+  if (cudaVersionMap[majorMinor]) {
+    return `https://download.pytorch.org/whl/${cudaVersionMap[majorMinor]}`;
+  }
+
+  // Default to CUDA 12.4 for newer versions, or 11.8 for older
+  const major = parseInt(cudaVersion.split('.')[0]);
+  if (major >= 12) {
+    return 'https://download.pytorch.org/whl/cu124';
+  } else if (major >= 11) {
+    return 'https://download.pytorch.org/whl/cu118';
+  }
+
+  // Fallback to CUDA 12.4
+  return 'https://download.pytorch.org/whl/cu124';
+}
+
 async function updateRequirementsTxt(
   pipCommand: string,
   pipArgs: string[],
@@ -1198,9 +1276,26 @@ export async function GET(request: NextRequest) {
             const dependencies = spaceJson.dependencies || [];
             
             if (dependencies.length > 0) {
+              // Check device type and add GPU torch index URL if needed
+              let requirementsContent = dependencies.map((dep: string) => dep).join('\n');
+              
+              try {
+                const deviceInfo = await getDeviceInfo();
+                if (deviceInfo.device === 'GPU') {
+                  const torchIndexUrl = getTorchIndexUrl(deviceInfo.cudaVersion);
+                  if (torchIndexUrl) {
+                    // Add --extra-index-url directive at the top of requirements file
+                    // This allows pip to download CUDA-compiled torch packages
+                    requirementsContent = `--extra-index-url ${torchIndexUrl}\n${requirementsContent}`;
+                    sendLog(controller, encoder, `[APP] GPU detected (CUDA ${deviceInfo.cudaVersion}). Adding PyTorch CUDA index URL: ${torchIndexUrl}`, logFilePath);
+                  }
+                }
+              } catch (error: any) {
+                sendLog(controller, encoder, `[WARN] Could not detect device info: ${error.message}. Continuing without GPU torch index URL.`, logFilePath);
+              }
+              
               // Create temporary requirements.txt from space.json dependencies
               const tempRequirementsPath = join(spacePath, 'requirements_temp.txt');
-              const requirementsContent = dependencies.map((dep: string) => dep).join('\n');
               writeFileSync(tempRequirementsPath, requirementsContent, 'utf-8');
               requirementsPath = tempRequirementsPath;
               
@@ -1268,7 +1363,8 @@ export async function GET(request: NextRequest) {
                 const conflictPronePackages = ['numpy', 'scipy', 'pandas', 'matplotlib', 'pillow'];
                 const adjustedLines = lines.map(line => {
                   const trimmed = line.trim();
-                  if (!trimmed || trimmed.startsWith('#')) {
+                  // Preserve empty lines, comments, and pip directives (--extra-index-url, --index-url, etc.)
+                  if (!trimmed || trimmed.startsWith('#') || trimmed.startsWith('--')) {
                     return line;
                   }
                   
