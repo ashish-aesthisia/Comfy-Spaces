@@ -400,7 +400,30 @@ async function updateRequirementsTxt(
 
     if (pipListCode === 0 && pipListOutput.trim()) {
       const requirementsFilePath = join(spacePath, 'requirements.txt');
-      writeFileSync(requirementsFilePath, pipListOutput, 'utf-8');
+      
+      // Preserve --extra-index-url from existing requirements.txt if it exists
+      let extraIndexUrlLines: string[] = [];
+      if (existsSync(requirementsFilePath)) {
+        try {
+          const existingContent = readFileSync(requirementsFilePath, 'utf-8');
+          const existingLines = existingContent.split('\n');
+          extraIndexUrlLines = existingLines.filter(line => {
+            const trimmed = line.trim();
+            return trimmed.startsWith('--extra-index-url') || trimmed.startsWith('--index-url');
+          });
+          if (extraIndexUrlLines.length > 0) {
+            sendLog(controller, encoder, `[APP] Preserving ${extraIndexUrlLines.length} index URL directive(s) from existing requirements.txt`, logFile);
+          }
+        } catch (error: any) {
+          sendLog(controller, encoder, `[WARN] Could not read existing requirements.txt to preserve index URLs: ${error.message}`, logFile);
+        }
+      }
+      
+      // Combine preserved index URLs with pip list output
+      const pipListLines = pipListOutput.trim().split('\n').filter(line => line.trim().length > 0);
+      const finalRequirementsContent = [...extraIndexUrlLines, ...pipListLines].join('\n');
+      
+      writeFileSync(requirementsFilePath, finalRequirementsContent, 'utf-8');
       sendLog(controller, encoder, `[APP] requirements.txt updated successfully`, logFile);
 
       // Also update space.json dependencies
@@ -417,8 +440,20 @@ async function updateRequirementsTxt(
             .filter(line => line.trim().length > 0)
             .map(line => line.trim());
           
+          // Preserve index URLs in dependencies array (at the beginning)
+          const existingDeps = spaceJson.dependencies || [];
+          const existingIndexUrls = existingDeps.filter((dep: string) => {
+            const trimmed = dep.trim();
+            return trimmed.startsWith('--extra-index-url') || trimmed.startsWith('--index-url');
+          });
+          
+          // Combine: existing index URLs first, then pip list packages
+          const finalDependencies = existingIndexUrls.length > 0 
+            ? [...existingIndexUrls, ...dependencies]
+            : [...extraIndexUrlLines, ...dependencies];
+          
           // Update dependencies in space.json
-          spaceJson.dependencies = dependencies;
+          spaceJson.dependencies = finalDependencies;
           
           // Write updated space.json
           writeFileSync(spaceJsonPath, JSON.stringify(spaceJson, null, 2), 'utf-8');
@@ -483,7 +518,27 @@ async function createRequirementsBkpIfMissing(
     });
 
     if (pipListCode === 0 && pipListOutput.trim()) {
-      writeFileSync(backupPath, pipListOutput, 'utf-8');
+      // Preserve --extra-index-url from existing requirements.txt if it exists
+      let extraIndexUrlLines: string[] = [];
+      const requirementsFilePath = join(spacePath, 'requirements.txt');
+      if (existsSync(requirementsFilePath)) {
+        try {
+          const existingContent = readFileSync(requirementsFilePath, 'utf-8');
+          const existingLines = existingContent.split('\n');
+          extraIndexUrlLines = existingLines.filter(line => {
+            const trimmed = line.trim();
+            return trimmed.startsWith('--extra-index-url') || trimmed.startsWith('--index-url');
+          });
+        } catch (error) {
+          // Ignore errors reading existing file
+        }
+      }
+      
+      // Combine preserved index URLs with pip list output
+      const pipListLines = pipListOutput.trim().split('\n').filter(line => line.trim().length > 0);
+      const finalBackupContent = [...extraIndexUrlLines, ...pipListLines].join('\n');
+      
+      writeFileSync(backupPath, finalBackupContent, 'utf-8');
       sendLog(controller, encoder, `[APP] requirements.bkp created successfully`, logFile);
     } else {
       sendLog(controller, encoder, `[WARN] Failed to create requirements.bkp: ${pipListError || 'Unknown error'}`, logFile);
