@@ -343,6 +343,19 @@ function resolvePipCommand(pythonExec: string, venvPath: string): PipCommand {
   return { command: pythonExec, args: ['-m', 'pip'], display: `${pythonExec} -m pip` };
 }
 
+const TORCH_PACKAGE_NAMES = ['torch', 'torchvision', 'torchaudio'];
+
+function normalizeDepNameForFilter(dep: string): string {
+  return dep.split(/[=<>!~\[\]]/)[0].trim().toLowerCase();
+}
+
+function filterOutTorchDeps(dependencies: string[]): string[] {
+  return dependencies.filter((dep) => {
+    const name = normalizeDepNameForFilter(dep);
+    return !TORCH_PACKAGE_NAMES.includes(name);
+  });
+}
+
 async function ensurePip(
   pythonExec: string,
   controller: ReadableStreamDefaultController,
@@ -411,11 +424,20 @@ async function updateRequirementsTxt(
           const spaceJson = JSON.parse(spaceJsonContent);
           
           // Parse pip list output into dependencies array
-          const dependencies = pipListOutput
+          let dependencies = pipListOutput
             .trim()
             .split('\n')
             .filter(line => line.trim().length > 0)
             .map(line => line.trim());
+          
+          // If GPU (torchExtraIndexUrl exists), filter out torch packages from space.json
+          // They are installed separately with --extra-index-url and shouldn't be in dependencies
+          const metadata = spaceJson.metadata || {};
+          const torchExtraIndexUrl = metadata.torchExtraIndexUrl;
+          if (torchExtraIndexUrl && typeof torchExtraIndexUrl === 'string') {
+            dependencies = filterOutTorchDeps(dependencies);
+            sendLog(controller, encoder, `[APP] Filtered out torch/torchvision/torchaudio from space.json dependencies (GPU mode)`, logFile);
+          }
           
           // Update dependencies in space.json
           spaceJson.dependencies = dependencies;
@@ -483,7 +505,27 @@ async function createRequirementsBkpIfMissing(
     });
 
     if (pipListCode === 0 && pipListOutput.trim()) {
-      writeFileSync(backupPath, pipListOutput, 'utf-8');
+      // If GPU (torchExtraIndexUrl exists), filter out torch packages from backup
+      // They are installed separately with --extra-index-url and shouldn't be in requirements.bkp
+      let backupContent = pipListOutput;
+      const spaceJsonPath = join(spacePath, 'space.json');
+      if (existsSync(spaceJsonPath)) {
+        try {
+          const spaceJsonContent = readFileSync(spaceJsonPath, 'utf-8');
+          const spaceJson = JSON.parse(spaceJsonContent);
+          const metadata = spaceJson.metadata || {};
+          const torchExtraIndexUrl = metadata.torchExtraIndexUrl;
+          if (torchExtraIndexUrl && typeof torchExtraIndexUrl === 'string') {
+            const lines = backupContent.trim().split('\n').filter(line => line.trim().length > 0);
+            const filteredLines = filterOutTorchDeps(lines);
+            backupContent = filteredLines.join('\n') + (filteredLines.length > 0 ? '\n' : '');
+            sendLog(controller, encoder, `[APP] Filtered out torch/torchvision/torchaudio from requirements.bkp (GPU mode)`, logFile);
+          }
+        } catch (error) {
+          // If we can't read space.json, use original content
+        }
+      }
+      writeFileSync(backupPath, backupContent, 'utf-8');
       sendLog(controller, encoder, `[APP] requirements.bkp created successfully`, logFile);
     } else {
       sendLog(controller, encoder, `[WARN] Failed to create requirements.bkp: ${pipListError || 'Unknown error'}`, logFile);
@@ -1195,10 +1237,46 @@ export async function GET(request: NextRequest) {
           try {
             const spaceJsonContent = readFileSync(spaceJsonPath, 'utf-8');
             const spaceJson = JSON.parse(spaceJsonContent);
-            const dependencies = spaceJson.dependencies || [];
-            
+            const metadata = spaceJson.metadata || {};
+            const torchExtraIndexUrl = metadata.torchExtraIndexUrl;
+            let dependencies: string[] = spaceJson.dependencies || [];
+
+            // If GPU/CUDA: install torch, torchvision, torchaudio first with --extra-index-url
+            if (torchExtraIndexUrl && typeof torchExtraIndexUrl === 'string') {
+              sendLog(controller, encoder, `[APP] Installing torch, torchvision, torchaudio from PyTorch index (--extra-index-url)...`, logFilePath);
+              const torchPipProcess = spawn(
+                pipInfo.command,
+                [...pipInfo.args, 'install', 'torch', 'torchvision', 'torchaudio', '--extra-index-url', torchExtraIndexUrl.trim()],
+                { cwd: spacePath, env: { ...process.env }, shell: false }
+              );
+              const torchPipKill = () => { if (!torchPipProcess.killed) torchPipProcess.kill('SIGTERM'); };
+              runningProcesses.push({ process: torchPipProcess, kill: torchPipKill });
+              torchPipProcess.stdout?.on('data', (data) => sendLog(controller, encoder, data.toString().trim(), logFilePath));
+              torchPipProcess.stderr?.on('data', (data) => sendLog(controller, encoder, data.toString().trim(), logFilePath));
+              const torchPipCode = await new Promise<number>((resolve) => {
+                torchPipProcess.on('close', (code) => {
+                  const idx = runningProcesses.findIndex(p => p.process === torchPipProcess);
+                  if (idx !== -1) runningProcesses.splice(idx, 1);
+                  resolve(code || 0);
+                });
+                torchPipProcess.on('error', () => {
+                  const idx = runningProcesses.findIndex(p => p.process === torchPipProcess);
+                  if (idx !== -1) runningProcesses.splice(idx, 1);
+                  resolve(1);
+                });
+              });
+              if (isCancelled) { controller.close(); return; }
+              if (torchPipCode !== 0) {
+                sendLog(controller, encoder, `[ERROR] Failed to install torch/torchvision/torchaudio from --extra-index-url`, logFilePath);
+                controller.close();
+                return;
+              }
+              sendLog(controller, encoder, `[APP] torch, torchvision, torchaudio installed successfully`, logFilePath);
+              dependencies = filterOutTorchDeps(dependencies);
+            }
+
             if (dependencies.length > 0) {
-              // Create temporary requirements.txt from space.json dependencies
+              // Create temporary requirements.txt from space.json dependencies (torch deps already excluded if GPU)
               const tempRequirementsPath = join(spacePath, 'requirements_temp.txt');
               const requirementsContent = dependencies.map((dep: string) => dep).join('\n');
               writeFileSync(tempRequirementsPath, requirementsContent, 'utf-8');

@@ -11,11 +11,27 @@ interface Release {
   prerelease: boolean;
 }
 
+interface DeviceInfo {
+  device: string;
+  gpuName: string;
+  cudaVersion: string;
+  pythonVersion: string;
+}
+
 interface CreateSpaceModalProps {
   opened: boolean;
   onClose: () => void;
   onSuccess: () => void;
 }
+
+const TORCH_INDEX_URLS = [
+  { value: 'https://download.pytorch.org/whl/cu118', label: 'CUDA 11.8' },
+  { value: 'https://download.pytorch.org/whl/cu121', label: 'CUDA 12.1' },
+  { value: 'https://download.pytorch.org/whl/cu126', label: 'CUDA 12.6' },
+  { value: 'https://download.pytorch.org/whl/cu130', label: 'CUDA 13.0 (latest)' },
+];
+
+const DEFAULT_TORCH_EXTRA_INDEX_URL = 'https://download.pytorch.org/whl/cu130';
 
 export default function CreateSpaceModal({ opened, onClose, onSuccess }: CreateSpaceModalProps) {
   const [visibleName, setVisibleName] = useState('');
@@ -23,6 +39,8 @@ export default function CreateSpaceModal({ opened, onClose, onSuccess }: CreateS
   const [comfyUIArgs, setComfyUIArgs] = useState('');
   const [branch, setBranch] = useState('');
   const [commitId, setCommitId] = useState('');
+  const [deviceInfo, setDeviceInfo] = useState<DeviceInfo | null>(null);
+  const [torchExtraIndexUrl, setTorchExtraIndexUrl] = useState(DEFAULT_TORCH_EXTRA_INDEX_URL);
   
   // Default ComfyUI launch args
   const defaultComfyUIArgs = '--listen 0.0.0.0';
@@ -33,6 +51,8 @@ export default function CreateSpaceModal({ opened, onClose, onSuccess }: CreateS
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
 
+  const isGpu = deviceInfo?.device === 'GPU' && deviceInfo?.cudaVersion !== 'NA';
+
   // Generate space ID from visible name
   const generateSpaceId = (name: string): string => {
     return name
@@ -42,6 +62,16 @@ export default function CreateSpaceModal({ opened, onClose, onSuccess }: CreateS
       .replace(/-+/g, '-') // Replace multiple dashes with single dash
       .replace(/^-|-$/g, ''); // Remove leading/trailing dashes
   };
+
+  // Fetch device info when modal opens (for GPU/CUDA detection)
+  useEffect(() => {
+    if (opened) {
+      fetch('/api/device-info')
+        .then((res) => res.json())
+        .then((data: DeviceInfo) => setDeviceInfo(data))
+        .catch(() => setDeviceInfo(null));
+    }
+  }, [opened]);
 
   // Fetch releases when modal opens
   useEffect(() => {
@@ -103,6 +133,7 @@ export default function CreateSpaceModal({ opened, onClose, onSuccess }: CreateS
           branch: branch || undefined,
           commitId: commitId || undefined,
           releaseTag: selectedRelease || undefined,
+          torchExtraIndexUrl: isGpu ? (torchExtraIndexUrl.trim() || undefined) : undefined,
         }),
       });
 
@@ -133,6 +164,7 @@ export default function CreateSpaceModal({ opened, onClose, onSuccess }: CreateS
       setBranch('');
       setCommitId('');
       setSelectedRelease(null);
+      setTorchExtraIndexUrl(DEFAULT_TORCH_EXTRA_INDEX_URL);
       setError(null);
       setSuccess(false);
       onClose();
@@ -254,6 +286,34 @@ export default function CreateSpaceModal({ opened, onClose, onSuccess }: CreateS
             }}
             description={`Default: main.py ${defaultComfyUIArgs}. Only specify arguments (main.py will be added automatically). Examples: --port 8189, --enable-cors-header, --disable-xformers`}
           />
+
+          {isGpu && (
+            <Select
+              label="Torch --extra-index-url"
+              value={torchExtraIndexUrl}
+              onChange={(value) => value && setTorchExtraIndexUrl(value)}
+              data={TORCH_INDEX_URLS}
+              disabled={creating}
+              styles={{
+                label: { color: '#ffffff', marginBottom: '6px', fontWeight: 500 },
+                input: { 
+                  backgroundColor: '#25262b', 
+                  border: '1px solid #373a40', 
+                  color: '#ffffff',
+                  '&:focus': { borderColor: '#0070f3' },
+                },
+                dropdown: { backgroundColor: '#25262b', border: '1px solid #373a40' },
+                option: { 
+                  backgroundColor: '#25262b',
+                  color: '#ffffff',
+                  '&[data-selected]': { backgroundColor: '#373a40' },
+                  '&[data-hovered]': { backgroundColor: '#2c2e33' },
+                },
+                description: { color: '#888888', fontSize: '12px', marginTop: '4px' },
+              }}
+              description="PyTorch wheel index for CUDA. torch, torchvision, and torchaudio will be installed from this index before other dependencies."
+            />
+          )}
         </Stack>
 
         <div style={{ position: 'relative', marginTop: '8px' }}>
