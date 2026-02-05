@@ -25,10 +25,10 @@ interface CreateSpaceModalProps {
 }
 
 const TORCH_INDEX_URLS = [
-  { value: 'https://download.pytorch.org/whl/cu118', label: 'CUDA 11.8' },
-  { value: 'https://download.pytorch.org/whl/cu121', label: 'CUDA 12.1' },
-  { value: 'https://download.pytorch.org/whl/cu126', label: 'CUDA 12.6' },
-  { value: 'https://download.pytorch.org/whl/cu130', label: 'CUDA 13.0 (latest)' },
+  { value: 'https://download.pytorch.org/whl/cu118', label: 'CUDA 11.8 - https://download.pytorch.org/whl/cu118' },
+  { value: 'https://download.pytorch.org/whl/cu121', label: 'CUDA 12.1 - https://download.pytorch.org/whl/cu121' },
+  { value: 'https://download.pytorch.org/whl/cu126', label: 'CUDA 12.6 - https://download.pytorch.org/whl/cu126' },
+  { value: 'https://download.pytorch.org/whl/cu130', label: 'CUDA 13.0 (latest) - https://download.pytorch.org/whl/cu130' },
 ];
 
 const DEFAULT_TORCH_EXTRA_INDEX_URL = 'https://download.pytorch.org/whl/cu130';
@@ -41,6 +41,7 @@ export default function CreateSpaceModal({ opened, onClose, onSuccess }: CreateS
   const [commitId, setCommitId] = useState('');
   const [deviceInfo, setDeviceInfo] = useState<DeviceInfo | null>(null);
   const [torchExtraIndexUrl, setTorchExtraIndexUrl] = useState(DEFAULT_TORCH_EXTRA_INDEX_URL);
+  const [customTorchUrl, setCustomTorchUrl] = useState('');
   
   // Default ComfyUI launch args
   const defaultComfyUIArgs = '--listen 0.0.0.0';
@@ -133,7 +134,7 @@ export default function CreateSpaceModal({ opened, onClose, onSuccess }: CreateS
           branch: branch || undefined,
           commitId: commitId || undefined,
           releaseTag: selectedRelease || undefined,
-          torchExtraIndexUrl: isGpu ? (torchExtraIndexUrl.trim() || undefined) : undefined,
+          torchExtraIndexUrl: isGpu ? ((customTorchUrl.trim() || torchExtraIndexUrl.trim()) || undefined) : undefined,
         }),
       });
 
@@ -165,6 +166,7 @@ export default function CreateSpaceModal({ opened, onClose, onSuccess }: CreateS
       setCommitId('');
       setSelectedRelease(null);
       setTorchExtraIndexUrl(DEFAULT_TORCH_EXTRA_INDEX_URL);
+      setCustomTorchUrl('');
       setError(null);
       setSuccess(false);
       onClose();
@@ -288,31 +290,56 @@ export default function CreateSpaceModal({ opened, onClose, onSuccess }: CreateS
           />
 
           {isGpu && (
-            <Select
-              label="Torch --extra-index-url"
-              value={torchExtraIndexUrl}
-              onChange={(value) => value && setTorchExtraIndexUrl(value)}
-              data={TORCH_INDEX_URLS}
-              disabled={creating}
-              styles={{
-                label: { color: '#ffffff', marginBottom: '6px', fontWeight: 500 },
-                input: { 
-                  backgroundColor: '#25262b', 
-                  border: '1px solid #373a40', 
-                  color: '#ffffff',
-                  '&:focus': { borderColor: '#0070f3' },
-                },
-                dropdown: { backgroundColor: '#25262b', border: '1px solid #373a40' },
-                option: { 
-                  backgroundColor: '#25262b',
-                  color: '#ffffff',
-                  '&[data-selected]': { backgroundColor: '#373a40' },
-                  '&[data-hovered]': { backgroundColor: '#2c2e33' },
-                },
-                description: { color: '#888888', fontSize: '12px', marginTop: '4px' },
-              }}
-              description="PyTorch wheel index for CUDA. torch, torchvision, and torchaudio will be installed from this index before other dependencies."
-            />
+            <>
+              <Select
+                label="Torch --extra-index-url"
+                value={torchExtraIndexUrl}
+                onChange={(value) => {
+                  if (value) {
+                    setTorchExtraIndexUrl(value);
+                    setCustomTorchUrl(''); // Clear custom URL when selecting from dropdown
+                  }
+                }}
+                data={TORCH_INDEX_URLS}
+                disabled={creating}
+                styles={{
+                  label: { color: '#ffffff', marginBottom: '6px', fontWeight: 500 },
+                  input: { 
+                    backgroundColor: '#25262b', 
+                    border: '1px solid #373a40', 
+                    color: '#ffffff',
+                    '&:focus': { borderColor: '#0070f3' },
+                  },
+                  dropdown: { backgroundColor: '#25262b', border: '1px solid #373a40' },
+                  option: { 
+                    backgroundColor: '#25262b',
+                    color: '#ffffff',
+                    '&[data-selected]': { backgroundColor: '#373a40' },
+                    '&[data-hovered]': { backgroundColor: '#2c2e33' },
+                  },
+                  description: { color: '#888888', fontSize: '12px', marginTop: '4px' },
+                }}
+                description="PyTorch wheel index for CUDA. torch, torchvision, and torchaudio will be installed from this index before other dependencies."
+              />
+              <TextInput
+                label="Custom Torch --extra-index-url (Optional)"
+                placeholder="Enter custom PyTorch index URL (overrides dropdown selection)"
+                value={customTorchUrl}
+                onChange={(e) => setCustomTorchUrl(e.currentTarget.value)}
+                disabled={creating}
+                styles={{
+                  label: { color: '#ffffff', marginBottom: '6px', fontWeight: 500 },
+                  input: { 
+                    backgroundColor: '#25262b', 
+                    border: '1px solid #373a40', 
+                    color: '#ffffff',
+                    '&:focus': { borderColor: '#0070f3' },
+                  },
+                  description: { color: '#888888', fontSize: '12px', marginTop: '4px' },
+                }}
+                description="Leave empty to use the selected dropdown value. If provided, this custom URL will be used instead."
+              />
+            </>
           )}
         </Stack>
 
