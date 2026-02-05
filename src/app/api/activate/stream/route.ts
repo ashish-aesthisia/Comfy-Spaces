@@ -409,7 +409,7 @@ async function updateRequirementsTxt(
           const existingLines = existingContent.split('\n');
           extraIndexUrlLines = existingLines.filter(line => {
             const trimmed = line.trim();
-            return trimmed.startsWith('--extra-index-url') || trimmed.startsWith('--index-url');
+            return trimmed.startsWith('--index-url') || trimmed.startsWith('--index-url');
           });
           if (extraIndexUrlLines.length > 0) {
             sendLog(controller, encoder, `[APP] Preserving ${extraIndexUrlLines.length} index URL directive(s) from existing requirements.txt`, logFile);
@@ -444,7 +444,7 @@ async function updateRequirementsTxt(
           const existingDeps = spaceJson.dependencies || [];
           const existingIndexUrls = existingDeps.filter((dep: string) => {
             const trimmed = dep.trim();
-            return trimmed.startsWith('--extra-index-url') || trimmed.startsWith('--index-url');
+            return trimmed.startsWith('--index-url') || trimmed.startsWith('--index-url');
           });
           
           // Combine: existing index URLs first, then pip list packages
@@ -527,7 +527,7 @@ async function createRequirementsBkpIfMissing(
           const existingLines = existingContent.split('\n');
           extraIndexUrlLines = existingLines.filter(line => {
             const trimmed = line.trim();
-            return trimmed.startsWith('--extra-index-url') || trimmed.startsWith('--index-url');
+            return trimmed.startsWith('--index-url') || trimmed.startsWith('--index-url');
           });
         } catch (error) {
           // Ignore errors reading existing file
