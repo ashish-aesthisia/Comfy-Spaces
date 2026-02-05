@@ -361,6 +361,20 @@ async function ensurePip(
   }
 }
 
+async function isGpuAvailable(): Promise<boolean> {
+  try {
+    const { stdout } = await withTimeout(
+      execFileAsync('nvidia-smi', ['--query-gpu=name', '--format=csv,noheader']),
+      5000,
+      'Timeout checking for GPU'
+    );
+    return stdout.trim().length > 0;
+  } catch (error) {
+    // nvidia-smi not available or failed, assume CPU
+    return false;
+  }
+}
+
 async function updateRequirementsTxt(
   pipCommand: string,
   pipArgs: string[],
@@ -1343,6 +1357,86 @@ export async function GET(request: NextRequest) {
                 sendLog(controller, encoder, `[APP] Dependencies installed successfully after conflict resolution`, logFilePath);
               } else {
                 sendLog(controller, encoder, `[APP] Dependencies installed successfully`, logFilePath);
+              }
+
+              // Check if GPU is available and reinstall torch packages with CUDA support
+              if (isCancelled) {
+                controller.close();
+                return;
+              }
+
+              sendLog(controller, encoder, `[APP] Checking for GPU availability...`, logFilePath);
+              const hasGpu = await isGpuAvailable();
+              
+              if (hasGpu) {
+                sendLog(controller, encoder, `[APP] GPU detected. Reinstalling torch, torchvision, and torchaudio with CUDA 13.0 support...`, logFilePath);
+                
+                const torchReinstallProcess = spawn(
+                  pipInfo.command,
+                  [
+                    ...pipInfo.args,
+                    'install',
+                    '--upgrade',
+                    '--force-reinstall',
+                    'torch',
+                    'torchvision',
+                    'torchaudio',
+                    '--extra-index-url',
+                    'https://download.pytorch.org/whl/cu130'
+                  ],
+                  {
+                    cwd: spacePath,
+                    env: { ...process.env },
+                    shell: false,
+                  }
+                );
+
+                const torchReinstallProcessKill = () => {
+                  if (!torchReinstallProcess.killed) {
+                    torchReinstallProcess.kill('SIGTERM');
+                  }
+                };
+                runningProcesses.push({ process: torchReinstallProcess, kill: torchReinstallProcessKill });
+
+                torchReinstallProcess.stdout?.on('data', (data) => {
+                  const output = data.toString();
+                  sendLog(controller, encoder, output.trim(), logFilePath);
+                });
+
+                torchReinstallProcess.stderr?.on('data', (data) => {
+                  const output = data.toString();
+                  sendLog(controller, encoder, output.trim(), logFilePath);
+                });
+
+                const torchReinstallCode = await new Promise<number>((resolve) => {
+                  torchReinstallProcess.on('close', (code) => {
+                    const index = runningProcesses.findIndex(p => p.process === torchReinstallProcess);
+                    if (index !== -1) {
+                      runningProcesses.splice(index, 1);
+                    }
+                    resolve(code || 0);
+                  });
+                  torchReinstallProcess.on('error', () => {
+                    const index = runningProcesses.findIndex(p => p.process === torchReinstallProcess);
+                    if (index !== -1) {
+                      runningProcesses.splice(index, 1);
+                    }
+                    resolve(1);
+                  });
+                });
+
+                if (isCancelled) {
+                  controller.close();
+                  return;
+                }
+
+                if (torchReinstallCode !== 0) {
+                  sendLog(controller, encoder, `[WARN] Failed to reinstall torch packages with CUDA support, but continuing...`, logFilePath);
+                } else {
+                  sendLog(controller, encoder, `[APP] Successfully reinstalled torch packages with CUDA 13.0 support`, logFilePath);
+                }
+              } else {
+                sendLog(controller, encoder, `[INFO] No GPU detected, skipping torch CUDA reinstallation`, logFilePath);
               }
               
               // Clean up temporary requirements file
