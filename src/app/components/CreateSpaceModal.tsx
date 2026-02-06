@@ -156,11 +156,11 @@ export default function CreateSpaceModal({ opened, onClose, onSuccess }: CreateS
       size="xl"
       closeOnClickOutside={!creating}
       closeOnEscape={!creating}
-      styles={{
-        title: { color: '#ffffff' },
-        content: { backgroundColor: '#1a1b1e', borderRadius: '8px' },
-        header: { backgroundColor: '#25262b', borderBottom: '1px solid #373a40', padding: '20px' },
-        body: { backgroundColor: '#1a1b1e', padding: '24px' },
+      classNames={{
+        title: 'text-white',
+        content: 'bg-gray-900 rounded-lg',
+        header: 'bg-gray-800 border-b border-gray-700 p-5',
+        body: 'bg-gray-900 p-6',
       }}
     >
       <Stack gap="md">
@@ -169,10 +169,10 @@ export default function CreateSpaceModal({ opened, onClose, onSuccess }: CreateS
             icon={<RiErrorWarningLine size={16} />}
             color="red"
             title="Error"
-            styles={{
-              root: { backgroundColor: '#2d2020', border: '1px solid #5c1a1a' },
-              title: { color: '#ff6b6b' },
-              message: { color: '#ff9999' },
+            classNames={{
+              root: 'bg-red-950/30 border border-red-900/50',
+              title: 'text-red-500',
+              message: 'text-red-400',
             }}
           >
             {error}
@@ -184,10 +184,10 @@ export default function CreateSpaceModal({ opened, onClose, onSuccess }: CreateS
             icon={<RiCheckLine size={16} />}
             color="green"
             title="Success"
-            styles={{
-              root: { backgroundColor: '#1e2e1e', border: '1px solid #2d5a2d' },
-              title: { color: '#51cf66' },
-              message: { color: '#69db7c' },
+            classNames={{
+              root: 'bg-green-950/30 border border-green-900/50',
+              title: 'text-green-500',
+              message: 'text-green-400',
             }}
           >
             Space created successfully!

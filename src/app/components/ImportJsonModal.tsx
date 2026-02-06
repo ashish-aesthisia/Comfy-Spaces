@@ -303,11 +303,11 @@ export default function ImportJsonModal({ opened, onClose, onSuccess }: ImportJs
       size="lg"
       closeOnClickOutside={!isImporting}
       closeOnEscape={!isImporting}
-      styles={{
-        title: { color: '#ffffff' },
-        content: { backgroundColor: '#1a1b1e', borderRadius: '8px' },
-        header: { backgroundColor: '#25262b', borderBottom: '1px solid #373a40', padding: '20px' },
-        body: { backgroundColor: '#1a1b1e', padding: '24px' },
+      classNames={{
+        title: 'text-white',
+        content: 'bg-gray-900 rounded-lg',
+        header: 'bg-gray-800 border-b border-gray-700 p-5',
+        body: 'bg-gray-900 p-6',
       }}
     >
       <Stack gap="lg">
@@ -316,10 +316,10 @@ export default function ImportJsonModal({ opened, onClose, onSuccess }: ImportJs
             icon={<RiErrorWarningLine size={18} />}
             color="red"
             title="Error"
-            styles={{
-              root: { backgroundColor: '#2d2020', border: '1px solid #5c1a1a', borderRadius: '8px' },
-              title: { color: '#ff6b6b', fontWeight: 600 },
-              message: { color: '#ff9999' },
+            classNames={{
+              root: 'bg-red-950/30 border border-red-900/50 rounded-lg',
+              title: 'text-red-500 font-semibold',
+              message: 'text-red-400',
             }}
           >
             {error}
@@ -355,15 +355,10 @@ export default function ImportJsonModal({ opened, onClose, onSuccess }: ImportJs
                 }}
                 description={newSpaceName ? `Space ID: ${generateSpaceId(newSpaceName)}` : undefined}
                 disabled={isImporting}
-                styles={{
-                  label: { color: '#ffffff', marginBottom: '6px', fontWeight: 500 },
-                  input: {
-                    backgroundColor: '#25262b',
-                    border: '1px solid #373a40',
-                    color: '#ffffff',
-                    '&:focus': { borderColor: '#0070f3' },
-                  },
-                  description: { color: '#888888', fontSize: '12px', marginTop: '4px' },
+                classNames={{
+                  label: 'text-white mb-1.5 font-medium',
+                  input: 'bg-gray-800 border-gray-700 text-white focus:border-blue-600',
+                  description: 'text-gray-400 text-xs mt-1',
                 }}
               />
               {error && nameConflict && (
@@ -380,10 +375,10 @@ export default function ImportJsonModal({ opened, onClose, onSuccess }: ImportJs
             icon={<RiCheckboxCircleFill size={18} />}
             color="green"
             title="Import Successful"
-            styles={{
-              root: { backgroundColor: '#1e2e1e', border: '1px solid #2d5a2d', borderRadius: '8px' },
-              title: { color: '#51cf66', fontWeight: 600 },
-              message: { color: '#69db7c' },
+            classNames={{
+              root: 'bg-green-950/30 border border-green-900/50 rounded-lg',
+              title: 'text-green-500 font-semibold',
+              message: 'text-green-400',
             }}
           >
             Space imported successfully! It will appear in your spaces list.

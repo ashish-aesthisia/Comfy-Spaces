@@ -457,7 +457,7 @@ export default function InstallPage() {
       const restOfMessage = appTagMatch[1];
       return (
         <>
-          <span style={{ color: '#4dabf7', fontWeight: 'bold' }}>[APP]</span>
+          <span className="text-blue-400 font-bold">[APP]</span>
           {restOfMessage && ' '}
           <span>{restOfMessage}</span>
         </>
@@ -586,36 +586,32 @@ export default function InstallPage() {
                     Hide Logs
                   </Button>
                 </Group>
-                <ScrollArea h={400} scrollbarSize={6}>
-                  <div style={{ paddingRight: '8px', fontFamily: 'monospace', fontSize: '12px' }}>
-                    {logs.length === 0 ? (
-                      <Text size="sm" c="dimmed" ta="center" py="xl">
-                        Waiting for logs...
-                      </Text>
-                    ) : (
-                      <>
-                        {logs.map((log, index) => (
-                          <div
-                            key={index}
-                            style={{
-                              color: '#ffffff',
-                              whiteSpace: 'pre-wrap',
-                              wordBreak: 'break-word',
-                              lineHeight: '1.5',
-                              marginBottom: '4px',
-                            }}
-                          >
-                            <span style={{ color: '#868e96', fontSize: '11px' }}>
-                              {new Date(log.timestamp).toLocaleTimeString()}{' '}
-                            </span>
-                            {renderLogMessage(log.message)}
-                          </div>
-                        ))}
-                        <div ref={logsEndRef} />
-                      </>
-                    )}
-                  </div>
-                </ScrollArea>
+                <div className="bg-black rounded overflow-hidden">
+                  <ScrollArea h={400} scrollbarSize={6}>
+                    <div className="pr-2 font-mono text-xs bg-black p-2">
+                      {logs.length === 0 ? (
+                        <Text size="sm" c="dimmed" ta="center" py="xl">
+                          Waiting for logs...
+                        </Text>
+                      ) : (
+                        <>
+                          {logs.map((log, index) => (
+                            <div
+                              key={index}
+                              className="text-white whitespace-pre-wrap break-words leading-relaxed mb-1"
+                            >
+                              <span className="text-gray-500 text-[11px]">
+                                {new Date(log.timestamp).toLocaleTimeString()}{' '}
+                              </span>
+                              {renderLogMessage(log.message)}
+                            </div>
+                          ))}
+                          <div ref={logsEndRef} />
+                        </>
+                      )}
+                    </div>
+                  </ScrollArea>
+                </div>
               </Stack>
             </Paper>
           )}
