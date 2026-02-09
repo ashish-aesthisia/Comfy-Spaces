@@ -375,6 +375,94 @@ async function isGpuAvailable(): Promise<boolean> {
   }
 }
 
+// CUDA version to PyTorch index URL mapping
+const CUDA_TO_TORCH_INDEX: Record<string, string> = {
+  "13.0": "https://download.pytorch.org/whl/cu130",
+  "12.8": "https://download.pytorch.org/whl/cu128",
+  "12.6": "https://download.pytorch.org/whl/cu126",
+};
+
+// Compare two version strings (e.g., "12.9" vs "13.0")
+// Returns: -1 if v1 < v2, 0 if v1 === v2, 1 if v1 > v2
+function compareVersions(v1: string, v2: string): number {
+  const parts1 = v1.split('.').map(Number);
+  const parts2 = v2.split('.').map(Number);
+  const maxLength = Math.max(parts1.length, parts2.length);
+  
+  for (let i = 0; i < maxLength; i++) {
+    const part1 = parts1[i] || 0;
+    const part2 = parts2[i] || 0;
+    if (part1 < part2) return -1;
+    if (part1 > part2) return 1;
+  }
+  return 0;
+}
+
+// Find the highest supported CUDA version ≤ installed version
+function findCompatibleCudaIndex(installedCudaVersion: string): string | null {
+  const supportedVersions = Object.keys(CUDA_TO_TORCH_INDEX).sort((a, b) => 
+    compareVersions(b, a) // Sort descending
+  );
+  
+  // Find the highest supported version that is ≤ installed version
+  for (const supportedVersion of supportedVersions) {
+    if (compareVersions(supportedVersion, installedCudaVersion) <= 0) {
+      return CUDA_TO_TORCH_INDEX[supportedVersion];
+    }
+  }
+  
+  // No compatible version found
+  return null;
+}
+
+// Detect CUDA version using nvcc
+async function getCudaVersion(): Promise<string | null> {
+  try {
+    const { stdout } = await withTimeout(
+      execFileAsync('nvcc', ['--version']),
+      5000,
+      'Timeout checking CUDA version'
+    );
+    // nvcc --version output format:
+    // nvcc: NVIDIA (R) Cuda compiler driver
+    // Copyright (c) 2005-2024 NVIDIA Corporation
+    // Built on ...
+    // Cuda compilation tools, release 12.4, V12.4.xxx
+    const versionMatch = stdout.match(/release\s+(\d+\.\d+)/i);
+    if (versionMatch) {
+      return versionMatch[1];
+    }
+    return null;
+  } catch (error) {
+    // nvcc not available or failed
+    return null;
+  }
+}
+
+// Get the appropriate PyTorch index URL based on GPU/CUDA availability
+async function getTorchIndexUrl(): Promise<{ indexUrl: string | null; cudaVersion: string | null }> {
+  const hasGpu = await isGpuAvailable();
+  
+  if (!hasGpu) {
+    return { indexUrl: null, cudaVersion: null };
+  }
+  
+  const cudaVersion = await getCudaVersion();
+  if (!cudaVersion) {
+    // GPU detected but CUDA version not available
+    // Fall back to highest supported version (cu130)
+    return { indexUrl: CUDA_TO_TORCH_INDEX["13.0"], cudaVersion: null };
+  }
+  
+  const compatibleIndex = findCompatibleCudaIndex(cudaVersion);
+  if (compatibleIndex) {
+    return { indexUrl: compatibleIndex, cudaVersion };
+  }
+  
+  // No compatible version found, fall back to highest supported version
+  return { indexUrl: CUDA_TO_TORCH_INDEX["13.0"], cudaVersion };
+}
+
 async function installRequirementsFromFile(
   requirementsPath: string,
   pipInfo: { command: string; args: string[] },
@@ -1650,23 +1738,28 @@ export async function GET(request: NextRequest) {
           return;
         }
 
-        sendLog(controller, encoder, `[APP] Checking for GPU availability...`, logFilePath);
-        const hasGpu = await isGpuAvailable();
+        sendLog(controller, encoder, `[APP] Checking for GPU availability and CUDA version...`, logFilePath);
+        const { indexUrl, cudaVersion } = await getTorchIndexUrl();
         
-        if (hasGpu) {
-          sendLog(controller, encoder, `[APP] GPU detected. Installing torch, torchvision, and torchaudio with CUDA 13.0 support...`, logFilePath);
+        if (indexUrl) {
+          const cudaVersionMsg = cudaVersion 
+            ? `CUDA ${cudaVersion} detected`
+            : `GPU detected (CUDA version detection unavailable)`;
+          sendLog(controller, encoder, `[APP] ${cudaVersionMsg}. Installing torch, torchvision, and torchaudio with CUDA support...`, logFilePath);
+          
+          const torchInstallArgs = [
+            ...pipInfo.args,
+            'install',
+            'torch',
+            'torchvision',
+            'torchaudio',
+            '--extra-index-url',
+            indexUrl
+          ];
           
           const torchInstallProcess = spawn(
             pipInfo.command,
-            [
-              ...pipInfo.args,
-              'install',
-              'torch',
-              'torchvision',
-              'torchaudio',
-              '--extra-index-url',
-              'https://download.pytorch.org/whl/cu130'
-            ],
+            torchInstallArgs,
             {
               cwd: spacePath,
               env: { ...process.env },
@@ -1716,7 +1809,10 @@ export async function GET(request: NextRequest) {
           if (torchInstallCode !== 0) {
             sendLog(controller, encoder, `[WARN] Failed to install torch packages with CUDA support, but continuing...`, logFilePath);
           } else {
-            sendLog(controller, encoder, `[APP] Successfully installed torch packages with CUDA 13.0 support`, logFilePath);
+            const successMsg = cudaVersion 
+              ? `Successfully installed torch packages with CUDA ${cudaVersion} support (using ${indexUrl})`
+              : `Successfully installed torch packages with CUDA support (using ${indexUrl})`;
+            sendLog(controller, encoder, `[APP] ${successMsg}`, logFilePath);
           }
         } else {
           sendLog(controller, encoder, `[APP] CPU detected. Installing torch, torchsde, torchvision, and torchaudio...`, logFilePath);
