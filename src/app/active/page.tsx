@@ -819,7 +819,8 @@ export default function ActivePage() {
                   <button
                     key={tab.id}
                     onClick={() => setActiveTab(tab.id)}
-                    className={`relative px-2 py-1 text-[10px] font-medium transition-colors duration-200 ${
+                    style={{ fontSize: '14px' }}
+                    className={`relative px-2 py-1 font-medium transition-colors duration-200 ${
                       activeTab === tab.id
                         ? 'text-white'
                         : 'text-gray-400 hover:text-gray-300'
@@ -855,7 +856,7 @@ export default function ActivePage() {
                   ) : (
                     <RiCircleFill size={6} color="#ff6b6b" />
                   )}
-                  Launch
+                  ComfyUI 
                   <RiExternalLinkLine size={12} />
                 </a>
                 <Menu shadow="md" width={200} position="bottom-end">
@@ -902,10 +903,9 @@ export default function ActivePage() {
                   }
                 }}
                 disabled={!selectedVersion}
-                className="px-2.5 py-1 text-xs border border-gray-700 rounded text-gray-300 hover:bg-gray-800 hover:border-gray-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
+                className="px-2.5 py-1 text-xs   rounded text-gray-300 hover:bg-gray-800 hover:border-gray-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
               >
                 <RiDownloadLine size={14} />
-                Export
               </button>
 
               {/* History Button */}
