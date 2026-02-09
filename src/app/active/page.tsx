@@ -254,7 +254,7 @@ export default function ActivePage() {
       const restOfMessage = appTagMatch[1];
       return (
         <>
-          <span className="text-blue-400 font-bold">[APP]</span>
+          <span style={{ color: '#4dabf7', fontWeight: 'bold' }}>[APP]</span>
           {restOfMessage && ' '}
           <span>{restOfMessage}</span>
         </>
@@ -267,7 +267,7 @@ export default function ActivePage() {
       const restOfMessage = comfyTagMatch[1];
       return (
         <>
-          <span className="text-green-500 font-bold">[COMFY]</span>
+          <span style={{ color: '#51cf66', fontWeight: 'bold' }}>[COMFY]</span>
           {restOfMessage && ' '}
           <span>{restOfMessage}</span>
         </>
@@ -1349,11 +1349,11 @@ export default function ActivePage() {
           </Group>
         }
         size="xl"
-        classNames={{
-          title: 'text-white',
-          content: 'bg-gray-900',
-          header: 'bg-gray-800 border-b border-gray-700',
-          body: 'bg-gray-900',
+        styles={{
+          title: { color: '#ffffff' },
+          content: { backgroundColor: '#1a1b1e' },
+          header: { backgroundColor: '#25262b', borderBottom: '1px solid #373a40' },
+          body: { backgroundColor: '#1a1b1e' },
         }}
       >
         {loadingHistory ? (
@@ -1361,10 +1361,10 @@ export default function ActivePage() {
         ) : requirementsHistory.length === 0 ? (
           <Text c="dimmed" ta="center" py="xl">No history available yet. History will be created when you install nodes or activate spaces.</Text>
         ) : (
-          <Grid gutter="md" className="h-[600px]">
+          <Grid gutter="md" style={{ height: '600px' }}>
             {/* Left Column: Diff View */}
             <Grid.Col span={8}>
-              <Stack gap="md" className="h-full flex flex-col">
+              <Stack gap="md" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
                 {loadingChanges ? (
                   <Text c="dimmed" ta="center" py="xl">Loading changes...</Text>
                 ) : changesDiff?.error ? (
@@ -1373,7 +1373,7 @@ export default function ActivePage() {
                   <Text c="dimmed" ta="center" py="xl">Select a history entry to view changes</Text>
                 ) : (
                   <>
-                    <Group justify="space-between" align="center" className="flex-shrink-0">
+                    <Group justify="space-between" align="center" style={{ flexShrink: 0 }}>
                       <Group gap="md">
                         <Text size="sm" c="#888888">
                           History: {changesDiff?.history?.lineCount || 0} lines
@@ -1386,9 +1386,19 @@ export default function ActivePage() {
                     
                     <Paper 
                       p="sm" 
-                      className="bg-black border border-gray-700 flex-1 flex flex-col min-h-0 font-mono text-xs leading-relaxed"
+                      style={{ 
+                        backgroundColor: '#0a0a0a', 
+                        border: '1px solid #373a40',
+                        flex: 1,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        minHeight: 0,
+                        fontFamily: 'monospace',
+                        fontSize: '12px',
+                        lineHeight: '1.6',
+                      }}
                     >
-                      <ScrollArea className="flex-1 h-full">
+                      <ScrollArea style={{ flex: 1, height: '100%' }}>
                         {changesDiff?.diff?.map((item: any, idx: number) => {
                           let bgColor = 'transparent';
                           let borderLeft = 'none';
@@ -1422,32 +1432,25 @@ export default function ActivePage() {
                           
                           const displayLine = item.currentLine || item.historyLine || '';
                           
-                          const bgClass = item.type === 'added' ? 'bg-green-950/30' :
-                                         item.type === 'removed' ? 'bg-red-950/30' :
-                                         item.type === 'updated' ? 'bg-yellow-950/30' :
-                                         item.type === 'downgraded' ? 'bg-red-950/20' : '';
-                          const borderClass = item.type === 'added' ? 'border-l-2 border-l-green-500' :
-                                             item.type === 'removed' ? 'border-l-2 border-l-red-500' :
-                                             item.type === 'updated' ? 'border-l-2 border-l-yellow-500' :
-                                             item.type === 'downgraded' ? 'border-l-2 border-l-red-400' : '';
-                          const textClass = item.type === 'added' ? 'text-green-500' :
-                                          item.type === 'removed' ? 'text-red-500' :
-                                          item.type === 'updated' ? 'text-yellow-500' :
-                                          item.type === 'downgraded' ? 'text-red-400' :
-                                          'text-gray-400';
-                          
                           return (
                             <div
                               key={idx}
-                              className={`py-0.5 px-2 mb-px whitespace-pre ${bgClass} ${borderClass} ${textClass}`}
+                              style={{
+                                padding: '2px 8px',
+                                backgroundColor: bgColor,
+                                borderLeft,
+                                marginBottom: '1px',
+                                whiteSpace: 'pre',
+                                color: textColor,
+                              }}
                             >
-                              <span className="text-gray-500 mr-2">
+                              <span style={{ color: '#666666', marginRight: '8px' }}>
                                 {String(item.lineNumber).padStart(4, ' ')}
                               </span>
                               <span>{prefix}</span>
                               <span>{displayLine || ' '}</span>
                               {item.type === 'updated' || item.type === 'downgraded' ? (
-                                <div className="pl-5 text-red-500 text-[11px]">
+                                <div style={{ paddingLeft: '20px', color: '#ff6b6b', fontSize: '11px' }}>
                                   {item.historyLine}
                                 </div>
                               ) : null}
@@ -1463,10 +1466,10 @@ export default function ActivePage() {
 
             {/* Right Column: History List */}
             <Grid.Col span={4}>
-              <Stack gap="xs" className="h-full flex flex-col">
-                <Text size="sm" fw={600} c="#ffffff" className="flex-shrink-0">History Entries</Text>
-                <Divider className="flex-shrink-0" />
-                <ScrollArea className="flex-1 min-h-0">
+              <Stack gap="xs" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+                <Text size="sm" fw={600} c="#ffffff" style={{ flexShrink: 0 }}>History Entries</Text>
+                <Divider style={{ flexShrink: 0 }} />
+                <ScrollArea style={{ flex: 1, minHeight: 0 }}>
                   <Stack gap="xs">
                     {requirementsHistory.map((entry) => {
                       const title = entry.type === 'node_install' && entry.nodeName
@@ -1479,16 +1482,27 @@ export default function ActivePage() {
                         <Paper
                           key={entry.id}
                           p="sm"
-                          className={`cursor-pointer transition-all duration-200 ${
-                            selectedHistoryEntry === entry.id 
-                              ? 'bg-gray-750 border border-blue-600' 
-                              : 'bg-gray-800 border border-gray-700 hover:bg-gray-750'
-                          }`}
+                          style={{
+                            backgroundColor: selectedHistoryEntry === entry.id ? '#2d2f35' : '#25262b',
+                            border: selectedHistoryEntry === entry.id ? '1px solid #0070f3' : '1px solid #373a40',
+                            cursor: 'pointer',
+                            transition: 'all 0.2s',
+                          }}
                           onClick={() => handleHistoryEntrySelect(entry.id)}
+                          onMouseEnter={(e) => {
+                            if (selectedHistoryEntry !== entry.id) {
+                              e.currentTarget.style.backgroundColor = '#2d2f35';
+                            }
+                          }}
+                          onMouseLeave={(e) => {
+                            if (selectedHistoryEntry !== entry.id) {
+                              e.currentTarget.style.backgroundColor = '#25262b';
+                            }
+                          }}
                         >
                           <Stack gap="xs">
                             <Group justify="space-between" align="flex-start">
-                              <Text size="sm" fw={500} c="#ffffff" className="flex-1">
+                              <Text size="sm" fw={500} c="#ffffff" style={{ flex: 1 }}>
                                 {title}
                               </Text>
                               <Button
@@ -1533,16 +1547,27 @@ export default function ActivePage() {
           </Text>
         }
         size="xl"
-        classNames={{
-          title: 'text-white',
-          content: 'bg-gray-900 max-h-[90vh] flex flex-col',
-          header: 'bg-gray-800 border-b border-gray-700',
-          body: 'bg-gray-900 flex-1 overflow-hidden flex flex-col',
+        styles={{
+          title: { color: '#ffffff' },
+          content: { 
+            backgroundColor: '#1a1b1e',
+            maxHeight: '90vh',
+            display: 'flex',
+            flexDirection: 'column',
+          },
+          header: { backgroundColor: '#25262b', borderBottom: '1px solid #373a40' },
+          body: { 
+            backgroundColor: '#1a1b1e',
+            flex: 1,
+            overflow: 'hidden',
+            display: 'flex',
+            flexDirection: 'column',
+          }
         }}
       >
-        <Stack gap="sm" className="h-full flex flex-col">
+        <Stack gap="sm" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
           <ScrollArea h={500} scrollbarSize={6}>
-            <div className="pr-2 font-mono text-xs">
+            <div style={{ paddingRight: '8px', fontFamily: 'monospace', fontSize: '12px' }}>
               {restartLogs.length === 0 ? (
                 <Text size="sm" c="dimmed" ta="center" py="xl">
                   Waiting for logs...
@@ -1552,9 +1577,15 @@ export default function ActivePage() {
                   {restartLogs.map((log, index) => (
                     <div
                       key={index}
-                      className="text-white whitespace-pre-wrap break-words leading-relaxed mb-1"
+                      style={{
+                        color: '#ffffff',
+                        whiteSpace: 'pre-wrap',
+                        wordBreak: 'break-word',
+                        lineHeight: '1.5',
+                        marginBottom: '4px',
+                      }}
                     >
-                      <span className="text-gray-500 text-[11px]">
+                      <span style={{ color: '#868e96', fontSize: '11px' }}>
                         {new Date(log.timestamp).toLocaleTimeString()}{' '}
                       </span>
                       {renderLogMessage(log.message)}
@@ -1582,18 +1613,18 @@ export default function ActivePage() {
           }
         }}
         title="Delete Node"
-        classNames={{
-          title: 'text-white',
-          content: 'bg-gray-900',
-          header: 'bg-gray-800 border-b border-gray-700',
-          body: 'bg-gray-900',
+        styles={{
+          title: { color: '#ffffff' },
+          content: { backgroundColor: '#1a1b1e' },
+          header: { backgroundColor: '#25262b', borderBottom: '1px solid #373a40' },
+          body: { backgroundColor: '#1a1b1e' },
         }}
       >
         <Stack gap="md">
-          <Text className="text-white">
+          <Text c="#ffffff">
             Are you sure you want to delete <strong>{nodeToDelete}</strong>? This action cannot be undone.
           </Text>
-          <Text size="sm" className="text-gray-400">
+          <Text size="sm" c="#888888">
             This will remove the node from the custom_nodes directory and update space.json.
           </Text>
           <Group justify="flex-end" gap="sm">
@@ -1604,7 +1635,7 @@ export default function ActivePage() {
                 setNodeToDelete(null);
               }}
               disabled={deleting}
-              className="text-white"
+              style={{ color: '#ffffff' }}
             >
               Cancel
             </Button>

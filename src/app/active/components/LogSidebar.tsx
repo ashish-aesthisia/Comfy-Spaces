@@ -157,7 +157,7 @@ export default function LogSidebar(props: LogSidebarProps = {}) {
       const restOfMessage = appTagMatch[1];
       return (
         <>
-          <span className="text-blue-400 font-bold">[APP]</span>
+          <span style={{ color: '#4dabf7', fontWeight: 'bold' }}>[APP]</span>
           {restOfMessage && ' '}
           <span>{restOfMessage}</span>
         </>
@@ -170,7 +170,7 @@ export default function LogSidebar(props: LogSidebarProps = {}) {
       const restOfMessage = comfyTagMatch[1];
       return (
         <>
-          <span className="text-green-500 font-bold">[COMFY]</span>
+          <span style={{ color: '#51cf66', fontWeight: 'bold' }}>[COMFY]</span>
           {restOfMessage && ' '}
           <span>{restOfMessage}</span>
         </>
@@ -187,11 +187,16 @@ export default function LogSidebar(props: LogSidebarProps = {}) {
       <Paper
         shadow="xl"
         p="md"
-        className="fixed top-0 h-screen z-[999] bg-gray-900 border-l border-gray-700"
         style={{
+          position: 'fixed',
           right: isOpen ? 0 : `-${sidebarWidth}px`,
+          top: 0,
           width: `${sidebarWidth}px`,
+          height: '100vh',
+          zIndex: 999,
           transition: isResizing ? 'none' : 'right 0.3s ease, width 0.3s ease',
+          backgroundColor: '#1a1b1e',
+          borderLeft: '1px solid #373a40',
         }}
       >
         {/* Resize Handle */}
@@ -201,10 +206,19 @@ export default function LogSidebar(props: LogSidebarProps = {}) {
               e.preventDefault();
               setIsResizing(true);
             }}
-            className="absolute left-0 top-0 w-1 h-full cursor-col-resize bg-transparent z-[1001]"
+            style={{
+              position: 'absolute',
+              left: 0,
+              top: 0,
+              width: '4px',
+              height: '100%',
+              cursor: 'col-resize',
+              backgroundColor: 'transparent',
+              zIndex: 1001,
+            }}
           />
         )}
-        <Stack gap="sm" className="h-full">
+        <Stack gap="sm" style={{ height: '100%' }}>
           <Group justify="space-between" align="center">
             <Text fw={600} size="lg">Logs</Text>
             <Group gap="xs">
@@ -242,7 +256,7 @@ export default function LogSidebar(props: LogSidebarProps = {}) {
               variant={logFilter === 'app' ? 'filled' : 'subtle'}
               size="xs"
               onClick={() => setLogFilter('app')}
-              className={logFilter === 'app' ? 'text-blue-400' : ''}
+              style={{ color: logFilter === 'app' ? '#4dabf7' : undefined }}
             >
               APP
             </Button>
@@ -250,17 +264,17 @@ export default function LogSidebar(props: LogSidebarProps = {}) {
               variant={logFilter === 'comfy' ? 'filled' : 'subtle'}
               size="xs"
               onClick={() => setLogFilter('comfy')}
-              className={logFilter === 'comfy' ? 'text-green-500' : ''}
+              style={{ color: logFilter === 'comfy' ? '#51cf66' : undefined }}
             >
               COMFY
             </Button>
           </Group>
 
           <ScrollArea
-            className="flex-1"
+            style={{ flex: 1 }}
             scrollbarSize={6}
           >
-            <div className="pr-2 font-mono text-xs">
+            <div style={{ paddingRight: '8px', fontFamily: 'monospace', fontSize: '12px' }}>
               {filteredLogs.length === 0 ? (
                 <Text size="sm" c="dimmed" ta="center" py="xl">
                   {searchQuery ? 'No logs match your search' : 'No logs yet...'}
@@ -270,9 +284,15 @@ export default function LogSidebar(props: LogSidebarProps = {}) {
                   {filteredLogs.map((log, index) => (
                     <div
                       key={index}
-                      className="text-white whitespace-pre-wrap break-words leading-relaxed mb-1"
+                      style={{
+                        color: '#ffffff',
+                        whiteSpace: 'pre-wrap',
+                        wordBreak: 'break-word',
+                        lineHeight: '1.5',
+                        marginBottom: '4px',
+                      }}
                     >
-                      <span className="text-gray-500 text-[11px]">
+                      <span style={{ color: '#868e96', fontSize: '11px' }}>
                         {new Date(log.timestamp).toLocaleTimeString()}{' '}
                       </span>
                       {renderLogMessage(log.message)}

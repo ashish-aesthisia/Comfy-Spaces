@@ -4,7 +4,7 @@ import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { Container, Title, Text, Select, Button, Group, Stack, Paper, ScrollArea, Badge, Menu, ActionIcon, Modal, TextInput, Tooltip, Textarea } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
-import { RiCheckLine, RiErrorWarningLine, RiRefreshLine, RiCheckboxCircleFill, RiCloseLine, RiAddLine, RiFileCodeLine, RiArrowRightLine, RiMoreFill, RiPencilLine, RiDeleteBinLine, RiDownloadLine, RiInformationLine, RiCodeLine, RiHistoryLine, RiFileCopyLine, RiTerminalBoxLine, RiArrowUpSLine, RiArrowDownSLine } from 'react-icons/ri';
+import { RiCheckLine, RiErrorWarningLine, RiRefreshLine, RiCheckboxCircleFill, RiCloseLine, RiAddLine, RiFileCodeLine, RiArrowRightLine, RiMoreFill, RiPencilLine, RiDeleteBinLine, RiDownloadLine, RiInformationLine, RiCodeLine, RiHistoryLine, RiFileCopyLine, RiTerminalBoxLine } from 'react-icons/ri';
 import CreateSpaceModal from './components/CreateSpaceModal';
 import ImportJsonModal from './components/ImportJsonModal';
 
@@ -34,7 +34,6 @@ export default function Home() {
   const [isActivating, setIsActivating] = useState(false);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [showLogs, setShowLogs] = useState(false);
-  const [logsExpanded, setLogsExpanded] = useState(false);
   const [isComfyUIReady, setIsComfyUIReady] = useState(false);
   const [activationFailed, setActivationFailed] = useState(false);
   const logsEndRef = useRef<HTMLDivElement>(null);
@@ -153,7 +152,6 @@ export default function Home() {
     setIsActivating(true);
     setLogs([]);
     setShowLogs(true);
-    setLogsExpanded(true);
     setIsComfyUIReady(false);
     setActivationFailed(false);
 
@@ -297,7 +295,7 @@ export default function Home() {
       const restOfMessage = appTagMatch[1];
       return (
         <>
-          <span className="text-blue-400 font-bold">[APP]</span>
+          <span style={{ color: '#4dabf7', fontWeight: 'bold' }}>[APP]</span>
           {restOfMessage && ' '}
           <span>{restOfMessage}</span>
         </>
@@ -310,7 +308,7 @@ export default function Home() {
       const restOfMessage = comfyTagMatch[1];
       return (
         <>
-          <span className="text-green-500 font-bold">[COMFY]</span>
+          <span style={{ color: '#51cf66', fontWeight: 'bold' }}>[COMFY]</span>
           {restOfMessage && ' '}
           <span>{restOfMessage}</span>
         </>
@@ -740,10 +738,10 @@ export default function Home() {
   };
 
   return (
-    <div className={`min-h-screen flex items-start justify-center bg-black pt-8 transition-all duration-300 ${showLogs ? (logsExpanded ? 'pb-[80vh]' : 'pb-16') : 'pb-8'}`}>
-      <Container size="xl" py="xl" className="w-full">
+    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', backgroundColor: '#000000', paddingTop: '2rem', paddingBottom: '2rem' }}>
+      <Container size="xl" py="xl" style={{ width: '100%' }}>
         <Stack gap="md">
-          <div className="text-left w-1/2 mx-auto">
+          <div style={{ textAlign: 'left', width: '50%', margin: '0 auto' }}>
             <Group gap="xs" align="center" mb="xs">
               <Title order={2} c="#ffffff">Comfy Spaces</Title>
               <Badge
@@ -894,7 +892,7 @@ export default function Home() {
                     }}
                   >
                     <Group justify="space-between" align="center" wrap="nowrap">
-                      <Stack gap="xs" className="flex-1 min-w-0">
+                      <Stack gap="xs" style={{ flex: 1, minWidth: 0 }}>
                         <Group gap="xs" wrap="nowrap" justify="space-between" align="center">
                           <Group gap="xs" wrap="nowrap">
                             <Text fw={500} c="#ffffff" size="sm">
@@ -1006,7 +1004,10 @@ export default function Home() {
                                 }}
                                 variant="outline"
                                 size="xs"
-                                className="border-red-500 text-red-500 hover:bg-red-950/20"
+                                style={{
+                                  borderColor: '#ff4444',
+                                  color: '#ff4444',
+                                }}
                                 leftSection={<RiCloseLine size={14} />}
                               >
                                 Cancel
@@ -1049,7 +1050,7 @@ export default function Home() {
               </Stack>
             </Paper>
           ) : spaces !== null ? (
-            <Paper p="xl" className="bg-gray-900 border border-gray-700 w-1/2 mx-auto text-center">
+            <Paper p="xl" style={{ backgroundColor: '#111111', border: '1px solid #333333', width: '50%', margin: '0 auto', textAlign: 'center' }}>
               <Stack gap="md" align="center">
                 <Text size="lg" c="#888888" fw={500}>
                   No spaces found
@@ -1061,169 +1062,102 @@ export default function Home() {
             </Paper>
           ) : null}
 
-          {/* Bottom Log Drawer */}
           {showLogs && selectedSpace && (
-            <div
-              className={`fixed bottom-0 left-0 right-0 z-50 bg-gray-900 border-t border-gray-700 shadow-2xl transition-all duration-300 ease-in-out ${
-                logsExpanded ? 'h-[80vh]' : 'h-16'
-              }`}
-            >
-              {/* Drag Handle / Header */}
-              <div
-                className="h-16 flex items-center justify-between px-4 cursor-pointer hover:bg-gray-800/50 transition-colors border-b border-gray-700"
-                onClick={() => setLogsExpanded(!logsExpanded)}
-              >
-                <div className="flex items-center gap-3">
-                  <div className="w-12 h-1 bg-gray-600 rounded-full"></div>
-                  <div className="flex items-center gap-2">
-                    <Text fw={600} size="sm" className="text-white">
-                      Activation Logs - {selectedSpace}
-                    </Text>
-                    {logs.length > 0 && (
-                      <span className="px-2 py-0.5 text-[10px] font-medium text-gray-400 bg-gray-800 rounded">
-                        {logs.length} entries
-                      </span>
-                    )}
-                    {isComfyUIReady && (
-                      <div className="flex items-center gap-1.5 px-2 py-0.5 bg-green-950/30 border border-green-500/30 rounded">
-                        <RiCheckboxCircleFill size={12} color="#00d9ff" />
-                        <Text size="xs" className="text-green-400 font-medium">
-                          Ready
-                        </Text>
-                      </div>
-                    )}
-                    {activationFailed && (
-                      <div className="flex items-center gap-1.5 px-2 py-0.5 bg-red-950/30 border border-red-500/30 rounded">
-                        <Text size="xs" className="text-red-400 font-medium">
-                          FAILED
-                        </Text>
-                      </div>
-                    )}
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  {logsExpanded && (
-                    <Button
-                      variant="subtle"
-                      size="xs"
-                      className="text-gray-400 hover:text-white"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (isComfyUIReady) {
-                          router.push('/active');
-                        }
-                      }}
-                      disabled={!isComfyUIReady}
-                    >
-                      Go to Dashboard
-                    </Button>
-                  )}
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setLogsExpanded(!logsExpanded);
-                    }}
-                    className="p-1.5 rounded hover:bg-gray-800 text-gray-400 hover:text-white transition-colors"
-                  >
-                    {logsExpanded ? <RiArrowDownSLine size={16} /> : <RiArrowUpSLine size={16} />}
-                  </button>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
+            <Paper p="md" style={{ backgroundColor: '#111111', border: '1px solid #333333' }}>
+              <Stack gap="sm">
+                <Group justify="space-between" align="center">
+                  <Text fw={600} size="lg" c="#ffffff">Activation Logs - {selectedSpace}</Text>
+                  <Button
+                    variant="subtle"
+                    size="xs"
+                    style={{ color: '#888888' }}
+                    onClick={() => {
                       setShowLogs(false);
-                      setLogsExpanded(false);
                       setLogs([]);
                       if (eventSourceRef.current) {
                         eventSourceRef.current.close();
                         eventSourceRef.current = null;
                       }
                     }}
-                    className="p-1.5 rounded hover:bg-gray-800 text-gray-400 hover:text-white transition-colors"
                   >
-                    <RiCloseLine size={16} />
-                  </button>
-                </div>
-              </div>
-
-              {/* Expanded Content */}
-              {logsExpanded && (
-                <div className="h-[calc(80vh-4rem)] flex flex-col">
-                  {/* Log Content */}
-                  <div className="flex-1 bg-black overflow-hidden">
-                    <ScrollArea h="100%" scrollbarSize={6}>
-                      <div className="pr-2 font-mono text-xs bg-black p-3">
-                        {logs.length === 0 ? (
-                          <div className="flex flex-col items-center justify-center h-full py-12">
-                            <Text size="sm" c="dimmed" ta="center">
-                              Waiting for logs...
-                            </Text>
-                            <Text size="xs" c="dimmed" className="mt-2">
-                              Activation in progress
-                            </Text>
-                          </div>
-                        ) : (
-                          <>
-                            {logs.map((log, index) => (
-                              <div
-                                key={index}
-                                className="text-white whitespace-pre-wrap break-words leading-relaxed mb-1 py-0.5 hover:bg-gray-900/30 rounded px-1"
-                              >
-                                <span className="text-gray-500 text-[11px]">
-                                  {new Date(log.timestamp).toLocaleTimeString()}{' '}
-                                </span>
-                                {renderLogMessage(log.message)}
-                              </div>
-                            ))}
-                            <div ref={logsEndRef} />
-                          </>
-                        )}
-                      </div>
-                    </ScrollArea>
-                  </div>
-
-                  {/* Footer */}
-                  <div className="h-12 px-4 border-t border-gray-700 bg-gray-800/50 flex items-center justify-between">
-                    <div className="flex items-center gap-4">
-                      <Text size="xs" className="text-gray-400">
-                        {logs.length} log entries
+                    Hide Logs
+                  </Button>
+                </Group>
+                <ScrollArea h={400} scrollbarSize={6}>
+                  <div style={{ paddingRight: '8px', fontFamily: 'monospace', fontSize: '12px' }}>
+                    {logs.length === 0 ? (
+                      <Text size="sm" c="dimmed" ta="center" py="xl">
+                        Waiting for logs...
                       </Text>
-                      {isComfyUIReady && (
-                        <div className="flex items-center gap-1.5">
-                          <RiCheckboxCircleFill size={14} color="#00d9ff" />
-                          <Text size="xs" className="text-green-400 font-medium">
-                            Space {selectedSpace} is ready
-                          </Text>
-                        </div>
-                      )}
-                      {activationFailed && (
-                        <div className="flex items-center gap-1.5">
-                          <Text size="xs" className="text-red-400 font-medium">
-                            Activation failed
-                          </Text>
-                          <Tooltip
-                            label="Activation failures are usually caused by missing or incompatible dependencies. From the Spaces list, click the three-dot menu to update dependencies or adjust their versions, then try activating the space again."
-                            multiline
-                            w={300}
-                            withArrow
+                    ) : (
+                      <>
+                        {logs.map((log, index) => (
+                          <div
+                            key={index}
+                            style={{
+                              color: '#ffffff',
+                              whiteSpace: 'pre-wrap',
+                              wordBreak: 'break-word',
+                              lineHeight: '1.5',
+                              marginBottom: '4px',
+                            }}
                           >
-                            <RiInformationLine size={14} color="red" className="cursor-help" />
-                          </Tooltip>
-                        </div>
-                      )}
-                    </div>
+                            <span style={{ color: '#868e96', fontSize: '11px' }}>
+                              {new Date(log.timestamp).toLocaleTimeString()}{' '}
+                            </span>
+                            {renderLogMessage(log.message)}
+                          </div>
+                        ))}
+                        <div ref={logsEndRef} />
+                      </>
+                    )}
+                  </div>
+                </ScrollArea>
+                <Group justify="space-between" align="center">
+                  <Group gap="xs" align="center">
+                    <Text size="xs" c="#888888">
+                      {logs.length} log entries
+                    </Text>
+                    {isComfyUIReady && (
+                      <Group gap="xs" align="center" style={{ marginLeft: '1rem' }}>
+                        <RiCheckboxCircleFill size={16} color="#00d9ff" />
+                        <Text size="sm" c="#00d9ff" fw={500}>
+                          Space {selectedSpace} is ready
+                        </Text>
+                      </Group>
+                    )}
+                  </Group>
+                  {activationFailed ? (
+                    <Group gap="xs" align="center">
+                      <Text size="sm" c="red" fw={500}>
+                        FAILED
+                      </Text>
+                      <Tooltip
+                        label="Activation failures are usually caused by missing or incompatible dependencies. From the Spaces list, click the three-dot menu to update dependencies or adjust their versions, then try activating the space again."
+                        multiline
+                        w={300}
+                        withArrow
+                      >
+                        <RiInformationLine size={16} color="red" style={{ cursor: 'help' }} />
+                      </Tooltip>
+                    </Group>
+                  ) : (
                     <Button
                       variant={isComfyUIReady ? "filled" : "subtle"}
-                      size="xs"
+                      size="sm"
                       onClick={() => router.push('/active')}
                       disabled={!isComfyUIReady}
-                      className={isComfyUIReady ? "bg-blue-600 text-white hover:bg-blue-700" : "text-gray-400"}
+                      style={{
+                        backgroundColor: isComfyUIReady ? '#0070f3' : undefined,
+                        color: isComfyUIReady ? '#ffffff' : '#000000',
+                      }}
                     >
                       Go to Dashboard
                     </Button>
-                  </div>
-                </div>
-              )}
-            </div>
+                  )}
+                </Group>
+              </Stack>
+            </Paper>
           )}
         </Stack>
       </Container>
@@ -1289,11 +1223,11 @@ export default function Home() {
         size="md"
         closeOnClickOutside={!isRenaming}
         closeOnEscape={!isRenaming}
-        classNames={{
-          title: 'text-white',
-          content: 'bg-gray-900 rounded-lg',
-          header: 'bg-gray-800 border-b border-gray-700 p-5',
-          body: 'bg-gray-900 p-6',
+        styles={{
+          title: { color: '#ffffff' },
+          content: { backgroundColor: '#1a1b1e', borderRadius: '8px' },
+          header: { backgroundColor: '#25262b', borderBottom: '1px solid #373a40', padding: '20px' },
+          body: { backgroundColor: '#1a1b1e', padding: '24px' },
         }}
       >
         <Stack gap="md">
@@ -1303,9 +1237,14 @@ export default function Home() {
             value={newSpaceName}
             onChange={(e) => setNewSpaceName(e.currentTarget.value)}
             disabled={isRenaming}
-            classNames={{
-              label: 'text-white mb-2',
-              input: 'bg-gray-800 border-gray-700 text-white focus:border-blue-600',
+            styles={{
+              label: { color: '#ffffff', marginBottom: '8px' },
+              input: {
+                backgroundColor: '#25262b',
+                border: '1px solid #373a40',
+                color: '#ffffff',
+                '&:focus': { borderColor: '#0070f3' },
+              },
             }}
           />
           <Group justify="flex-end" mt="md">
@@ -1317,14 +1256,17 @@ export default function Home() {
                 setNewSpaceName('');
               }}
               disabled={isRenaming}
-              className="text-gray-400"
+              style={{ color: '#888888' }}
             >
               Cancel
             </Button>
             <Button
               onClick={handleRename}
               disabled={isRenaming || !newSpaceName.trim()}
-              className="bg-blue-600 text-white hover:bg-blue-700"
+              style={{
+                backgroundColor: '#0070f3',
+                color: '#ffffff',
+              }}
             >
               {isRenaming ? 'Renaming...' : 'Rename'}
             </Button>
@@ -1349,11 +1291,11 @@ export default function Home() {
         size="md"
         closeOnClickOutside={!isDuplicating}
         closeOnEscape={!isDuplicating}
-        classNames={{
-          title: 'text-white',
-          content: 'bg-gray-900 rounded-lg',
-          header: 'bg-gray-800 border-b border-gray-700 p-5',
-          body: 'bg-gray-900 p-6',
+        styles={{
+          title: { color: '#ffffff' },
+          content: { backgroundColor: '#1a1b1e', borderRadius: '8px' },
+          header: { backgroundColor: '#25262b', borderBottom: '1px solid #373a40', padding: '20px' },
+          body: { backgroundColor: '#1a1b1e', padding: '24px' },
         }}
       >
         <Stack gap="md">
@@ -1366,9 +1308,14 @@ export default function Home() {
             value={newDuplicateSpaceName}
             onChange={(e) => setNewDuplicateSpaceName(e.currentTarget.value)}
             disabled={isDuplicating}
-            classNames={{
-              label: 'text-white mb-2',
-              input: 'bg-gray-800 border-gray-700 text-white focus:border-blue-600',
+            styles={{
+              label: { color: '#ffffff', marginBottom: '8px' },
+              input: {
+                backgroundColor: '#25262b',
+                border: '1px solid #373a40',
+                color: '#ffffff',
+                '&:focus': { borderColor: '#0070f3' },
+              },
             }}
           />
           <Group justify="flex-end" mt="md">
@@ -1380,14 +1327,17 @@ export default function Home() {
                 setNewDuplicateSpaceName('');
               }}
               disabled={isDuplicating}
-              className="text-gray-400"
+              style={{ color: '#888888' }}
             >
               Cancel
             </Button>
             <Button
               onClick={handleDuplicate}
               disabled={isDuplicating || !newDuplicateSpaceName.trim()}
-              className="bg-blue-600 text-white hover:bg-blue-700"
+              style={{
+                backgroundColor: '#0070f3',
+                color: '#ffffff',
+              }}
             >
               {isDuplicating ? 'Cloning...' : 'Clone'}
             </Button>
@@ -1408,44 +1358,89 @@ export default function Home() {
           </Text>
         }
         size="xl"
-        classNames={{
-          content: 'bg-gray-900 max-h-[90vh] flex flex-col',
-          header: 'bg-gray-900 border-b border-gray-700',
-          body: 'bg-gray-900 flex-1 overflow-hidden flex flex-col',
+        styles={{
+          content: { 
+            backgroundColor: '#1a1b1e',
+            maxHeight: '90vh',
+            display: 'flex',
+            flexDirection: 'column',
+          },
+          header: { backgroundColor: '#1a1b1e', borderBottom: '1px solid #373a40' },
+          body: { 
+            backgroundColor: '#1a1b1e',
+            flex: 1,
+            overflow: 'hidden',
+            display: 'flex',
+            flexDirection: 'column',
+          }
         }}
       >
-        <Stack gap="md" className="h-full flex flex-col">
+        <Stack gap="md" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
           <Text size="sm" c="#888888">
             Edit the requirements.txt file below. Each line should contain a package name and optional version specification.
           </Text>
           <Paper
             p="sm"
-            className="bg-black border border-gray-700 relative flex-1 min-h-0 flex flex-col"
+            style={{
+              backgroundColor: '#0a0a0a',
+              border: '1px solid #373a40',
+              position: 'relative',
+              flex: 1,
+              minHeight: 0,
+              display: 'flex',
+              flexDirection: 'column',
+            }}
           >
             <ScrollArea h="calc(90vh - 250px)">
-              <div className="flex">
+              <div style={{ display: 'flex' }}>
                 {/* Line numbers */}
-                <div className="py-2 px-2 pl-3 font-mono text-xs leading-relaxed text-gray-500 bg-black border-r border-gray-700 select-none min-w-[50px] text-right flex-shrink-0">
+                <div
+                  style={{
+                    padding: '8px 8px 8px 12px',
+                    fontFamily: 'monospace',
+                    fontSize: '12px',
+                    lineHeight: '1.6',
+                    color: '#666666',
+                    backgroundColor: '#0a0a0a',
+                    borderRight: '1px solid #373a40',
+                    userSelect: 'none',
+                    minWidth: '50px',
+                    textAlign: 'right',
+                    flexShrink: 0,
+                  }}
+                >
                   {requirementsContent.split('\n').map((_, index) => (
-                    <div key={index} className="min-h-[19.2px]">
+                    <div key={index} style={{ minHeight: '19.2px' }}>
                       {index + 1}
                     </div>
                   ))}
                   {requirementsContent === '' && (
-                    <div className="min-h-[19.2px]">1</div>
+                    <div style={{ minHeight: '19.2px' }}>1</div>
                   )}
                 </div>
                 {/* Textarea */}
-                <div className="flex-1 min-w-0">
+                <div style={{ flex: 1, minWidth: 0 }}>
                   <Textarea
                     value={requirementsContent}
                     onChange={(e) => setRequirementsContent(e.currentTarget.value)}
                     placeholder="package==version&#10;another-package>=1.0.0"
                     autosize
                     minRows={Math.max(20, requirementsContent.split('\n').length || 1)}
-                    classNames={{
-                      input: 'font-mono text-xs leading-relaxed bg-black text-white border-none p-2 w-full resize-none',
-                      wrapper: 'w-full',
+                    styles={{
+                      input: {
+                        fontFamily: 'monospace',
+                        fontSize: '12px',
+                        lineHeight: '1.6',
+                        backgroundColor: '#0a0a0a',
+                        color: '#ffffff',
+                        border: 'none',
+                        padding: '8px',
+                        width: '100%',
+                        resize: 'none',
+                      },
+                      wrapper: {
+                        width: '100%',
+                      },
                     }}
                   />
                 </div>
@@ -1460,14 +1455,17 @@ export default function Home() {
                 setSpaceToUpdate(null);
                 setRequirementsContent('');
               }}
-              className="text-gray-400"
+              style={{ color: '#888888' }}
             >
               Cancel
             </Button>
             <Button
               onClick={handleSaveAndActivate}
               loading={isSaving}
-              className="bg-blue-600 text-white hover:bg-blue-700"
+              style={{
+                backgroundColor: '#0070f3',
+                color: '#ffffff',
+              }}
             >
               Save & Activate
             </Button>
@@ -1488,11 +1486,22 @@ export default function Home() {
           </Text>
         }
         size="xl"
-        classNames={{
-          title: 'text-white',
-          content: 'bg-gray-900 max-h-[90vh] flex flex-col',
-          header: 'bg-gray-800 border-b border-gray-700',
-          body: 'bg-gray-900 flex-1 overflow-hidden flex flex-col',
+        styles={{
+          title: { color: '#ffffff' },
+          content: { 
+            backgroundColor: '#1a1b1e',
+            maxHeight: '90vh',
+            display: 'flex',
+            flexDirection: 'column',
+          },
+          header: { backgroundColor: '#25262b', borderBottom: '1px solid #373a40' },
+          body: { 
+            backgroundColor: '#1a1b1e',
+            flex: 1,
+            overflow: 'hidden',
+            display: 'flex',
+            flexDirection: 'column',
+          }
         }}
       >
         {loadingHistory ? (
@@ -1550,19 +1559,22 @@ export default function Home() {
                     
                     const displayLine = item.currentLine || item.backupLine || '';
                     
-                    const bgClass = item.type === 'added' ? 'bg-green-950/30' :
-                                   item.type === 'removed' ? 'bg-red-950/30' : '';
-                    const borderClass = item.type === 'added' ? 'border-l-2 border-l-green-500' :
-                                       item.type === 'removed' ? 'border-l-2 border-l-red-500' : '';
-                    const textClass = item.type === 'added' ? 'text-green-500' :
-                                     item.type === 'removed' ? 'text-red-500' : 'text-gray-400';
-                    
                     return (
                       <div
                         key={idx}
-                        className={`py-0.5 px-2 mb-px whitespace-pre font-mono text-xs leading-relaxed ${bgClass} ${borderClass} ${textClass}`}
+                        style={{
+                          padding: '2px 8px',
+                          backgroundColor: bgColor,
+                          borderLeft,
+                          marginBottom: '1px',
+                          whiteSpace: 'pre',
+                          color: textColor,
+                          fontFamily: 'monospace',
+                          fontSize: '12px',
+                          lineHeight: '1.6',
+                        }}
                       >
-                        <span className="text-gray-500 mr-2">
+                        <span style={{ color: '#666666', marginRight: '8px' }}>
                           {String(item.lineNumber).padStart(4, ' ')}
                         </span>
                         <span>{prefix}</span>
@@ -1593,11 +1605,11 @@ export default function Home() {
           </Text>
         }
         size="lg"
-        classNames={{
-          title: 'text-white',
-          content: 'bg-gray-900',
-          header: 'bg-gray-800 border-b border-gray-700',
-          body: 'bg-gray-900',
+        styles={{
+          title: { color: '#ffffff' },
+          content: { backgroundColor: '#1a1b1e' },
+          header: { backgroundColor: '#25262b', borderBottom: '1px solid #373a40' },
+          body: { backgroundColor: '#1a1b1e' }
         }}
       >
         <Stack gap="md">
@@ -1606,9 +1618,9 @@ export default function Home() {
           ) : (
             <>
               {currentCmdArgs && (
-                <Paper p="sm" className="bg-gray-800 border border-gray-700">
+                <Paper p="sm" style={{ backgroundColor: '#25262b', border: '1px solid #373a40' }}>
                   <Text size="sm" c="#888888" mb="xs" fw={500}>Current Arguments (saved in space.json):</Text>
-                  <Text size="sm" c="#ffffff" className="font-mono break-all">
+                  <Text size="sm" c="#ffffff" style={{ fontFamily: 'monospace', wordBreak: 'break-all' }}>
                     {currentCmdArgs || '(none)'}
                   </Text>
                 </Paper>
@@ -1619,10 +1631,15 @@ export default function Home() {
                 value={cmdArgs}
                 onChange={(e) => setCmdArgs(e.currentTarget.value)}
                 disabled={isSavingCmdArgs}
-                classNames={{
-                  label: 'text-white mb-1.5 font-medium',
-                  input: 'bg-gray-800 border-gray-700 text-white focus:border-blue-600',
-                  description: 'text-gray-400 text-xs mt-1',
+                styles={{
+                  label: { color: '#ffffff', marginBottom: '6px', fontWeight: 500 },
+                  input: {
+                    backgroundColor: '#25262b',
+                    border: '1px solid #373a40',
+                    color: '#ffffff',
+                    '&:focus': { borderColor: '#0070f3' },
+                  },
+                  description: { color: '#888888', fontSize: '12px', marginTop: '4px' },
                 }}
                 description="Enter command-line arguments for ComfyUI launch. main.py is added automatically. Leave empty to use default arguments."
               />
@@ -1638,7 +1655,7 @@ export default function Home() {
                 setCurrentCmdArgs(null);
               }}
               disabled={isSavingCmdArgs || loadingCmdArgs}
-              className="text-gray-400"
+              style={{ color: '#888888' }}
             >
               Cancel
             </Button>
@@ -1646,7 +1663,10 @@ export default function Home() {
               onClick={handleSaveCmdArgs}
               loading={isSavingCmdArgs}
               disabled={loadingCmdArgs}
-              className="bg-blue-600 text-white hover:bg-blue-700"
+              style={{
+                backgroundColor: '#0070f3',
+                color: '#ffffff',
+              }}
             >
               Save
             </Button>
