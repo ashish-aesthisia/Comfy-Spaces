@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Modal, TextInput, Button, Stack, Group, Text, Select, Grid, Loader, Alert } from '@mantine/core';
+import { Modal, TextInput, Button, Stack, Group, Text, Select, Grid, Loader, Alert, Switch, Anchor } from '@mantine/core';
 import { RiErrorWarningLine, RiCheckLine } from 'react-icons/ri';
 
 interface Release {
@@ -23,6 +23,7 @@ export default function CreateSpaceModal({ opened, onClose, onSuccess }: CreateS
   const [comfyUIArgs, setComfyUIArgs] = useState('');
   const [branch, setBranch] = useState('');
   const [commitId, setCommitId] = useState('');
+  const [installManager, setInstallManager] = useState(true); // Default: true
   
   // Default ComfyUI launch args
   const defaultComfyUIArgs = '--listen 0.0.0.0';
@@ -103,6 +104,7 @@ export default function CreateSpaceModal({ opened, onClose, onSuccess }: CreateS
           branch: branch || undefined,
           commitId: commitId || undefined,
           releaseTag: selectedRelease || undefined,
+          installManager,
         }),
       });
 
@@ -133,6 +135,7 @@ export default function CreateSpaceModal({ opened, onClose, onSuccess }: CreateS
       setBranch('');
       setCommitId('');
       setSelectedRelease(null);
+      setInstallManager(true); // Reset to default
       setError(null);
       setSuccess(false);
       onClose();
@@ -400,6 +403,34 @@ export default function CreateSpaceModal({ opened, onClose, onSuccess }: CreateS
             </Grid.Col>
           </Grid>
         </div>
+
+        <Stack gap="md" mt="md">
+          <Switch
+            label="Install ComfyUI-Manager"
+            description={
+              <>
+                Clone ComfyUI-Manager from a{' '}
+                <Anchor
+                  href="https://github.com/ashish-aesthisia/ComfyUI-Manager"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ color: '#4dabf7', textDecoration: 'underline', fontSize: '12px' }}
+                >
+                  custom source
+                </Anchor>
+                {' '}that adds dependency safety scanning, preventing incompatible or unsafe requirement updates from breaking ComfyUI.
+              </>
+            }
+            checked={installManager}
+            onChange={(e) => setInstallManager(e.currentTarget.checked)}
+            disabled={creating}
+            styles={{
+              label: { color: '#ffffff', fontWeight: 500 },
+              description: { color: '#888888', fontSize: '12px', marginTop: '4px' },
+              track: { backgroundColor: installManager ? '#0070f3' : '#373a40' },
+            }}
+          />
+        </Stack>
 
         <Group justify="flex-end" mt="xl" pt="md" style={{ borderTop: '1px solid #373a40' }}>
           <Button

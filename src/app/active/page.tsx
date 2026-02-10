@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { Container, Title, Text, Stack, Button, Grid, Card, Group, Menu, ActionIcon, Modal, ScrollArea, Paper, Badge, Divider } from '@mantine/core';
 import { useRouter } from 'next/navigation';
-import { RiHomeLine, RiCheckboxCircleFill, RiCloseCircleFill, RiDownloadLine, RiPencilLine, RiMoreFill, RiDeleteBinLine, RiHistoryLine, RiFileListLine, RiArrowDownSLine, RiArrowUpSLine, RiExternalLinkLine, RiAddLine, RiRefreshLine, RiCircleFill } from 'react-icons/ri';
+import { RiHomeLine, RiCheckboxCircleFill, RiCloseCircleFill, RiDownloadLine, RiPencilLine, RiMoreFill, RiDeleteBinLine, RiHistoryLine, RiFileListLine, RiArrowDownSLine, RiArrowUpSLine, RiExternalLinkLine, RiAddLine, RiRefreshLine, RiCircleFill, RiFolderLine, RiFolderOpenLine, RiFileLine, RiImageLine, RiVideoLine, RiFileTextLine } from 'react-icons/ri';
 import LogSidebar from './components/LogSidebar';
 import NodeTreeModal from './components/NodeTreeModal';
 
@@ -33,11 +33,40 @@ interface Dependency {
   fullLine: string;
 }
 
+interface ModelFile {
+  name: string;
+  type: string;
+  size: number;
+  path: string;
+  formattedSize?: string;
+}
+
+interface ModelFolder {
+  name: string;
+  type: 'folder';
+  path: string;
+  children: (ModelFile | ModelFolder)[];
+  totalSize?: number;
+}
+
+type ModelItem = ModelFile | ModelFolder;
+
+type TabType = 'comfyui' | 'nodes' | 'models' | 'files';
+
 export default function ActivePage() {
+  const [activeTab, setActiveTab] = useState<TabType>('comfyui');
   const [selectedVersion, setSelectedVersion] = useState<string>('');
   const [spaces, setSpaces] = useState<SpaceInfo[]>([]);
   const [nodes, setNodes] = useState<Node[]>([]);
   const [dependencies, setDependencies] = useState<Dependency[]>([]);
+  const [models, setModels] = useState<ModelItem[]>([]);
+  const [loadingModels, setLoadingModels] = useState(false);
+  const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set());
+  const [files, setFiles] = useState<any[]>([]);
+  const [filesGroupedByDate, setFilesGroupedByDate] = useState<Record<string, any[]>>({});
+  const [loadingFiles, setLoadingFiles] = useState(false);
+  const [collapsedDates, setCollapsedDates] = useState<Set<string>>(new Set());
+  const [imageErrors, setImageErrors] = useState<Set<string>>(new Set());
   const [dependenciesExpanded, setDependenciesExpanded] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshingNodes, setRefreshingNodes] = useState(false);
@@ -397,6 +426,138 @@ export default function ActivePage() {
     }
   };
 
+  const fetchModels = async () => {
+    setLoadingModels(true);
+    try {
+      const response = await fetch('/api/models');
+      const data = await response.json();
+      if (data.error) {
+        console.error('Error fetching models:', data.error);
+        setModels([]);
+      } else {
+        setModels(data.structure || []);
+      }
+    } catch (err) {
+      console.error('Error fetching models:', err);
+      setModels([]);
+    } finally {
+      setLoadingModels(false);
+    }
+  };
+
+  const toggleFolder = (path: string) => {
+    setCollapsedFolders(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(path)) {
+        newSet.delete(path);
+      } else {
+        newSet.add(path);
+      }
+      return newSet;
+    });
+  };
+
+  const formatFileSize = (bytes: number): string => {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+  };
+
+  const renderModelItem = (item: ModelItem, level: number = 0): JSX.Element => {
+    const isFolder = 'type' in item && item.type === 'folder';
+    const isCollapsed = collapsedFolders.has(item.path);
+    const indent = level * 24;
+
+    if (isFolder) {
+      const folder = item as ModelFolder;
+      const isEmpty = folder.children.length === 0;
+      const FolderIcon = isCollapsed ? RiFolderLine : RiFolderOpenLine;
+      
+      return (
+        <div key={item.path} className="group">
+          <div
+            className="flex items-center gap-3 py-2.5 px-4 hover:bg-gray-800/50 rounded-lg cursor-pointer transition-all duration-200 border border-transparent hover:border-gray-700/50"
+            style={{ paddingLeft: `${indent + 16}px` }}
+            onClick={() => toggleFolder(item.path)}
+          >
+            <div className="flex items-center gap-3 flex-1 min-w-0">
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <FolderIcon 
+                  size={18} 
+                  className={`transition-colors ${isEmpty ? 'text-gray-600' : 'text-blue-400'}`}
+                />
+                <RiArrowDownSLine 
+                  size={14} 
+                  className={`text-gray-500 transition-all duration-200 ${isCollapsed ? '-rotate-90' : ''} ${isEmpty ? 'opacity-40' : ''}`}
+                />
+              </div>
+              <span className={`text-sm font-semibold truncate ${isEmpty ? 'text-gray-500' : 'text-gray-200'}`}>
+                {folder.name}
+              </span>
+              <div className="flex items-center gap-2 flex-shrink-0 ml-auto">
+                {isEmpty ? (
+                  <span className="px-2 py-0.5 text-xs font-medium text-gray-600 bg-gray-800/50 rounded-md">empty</span>
+                ) : folder.totalSize ? (
+                  <span className="px-2 py-0.5 text-xs font-medium text-gray-400 bg-gray-800/30 rounded-md">
+                    {formatFileSize(folder.totalSize)}
+                  </span>
+                ) : null}
+                {!isEmpty && (
+                  <span className="px-2 py-0.5 text-xs font-medium text-gray-500 bg-gray-800/30 rounded-md">
+                    {folder.children.length} {folder.children.length === 1 ? 'item' : 'items'}
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+          {!isCollapsed && !isEmpty && (
+            <div className="ml-4 border-l border-gray-700/50">
+              {folder.children.map(child => renderModelItem(child, level + 1))}
+            </div>
+          )}
+        </div>
+      );
+    } else {
+      const file = item as ModelFile;
+      const getTypeColor = (type: string) => {
+        const colors: Record<string, string> = {
+          checkpoints: 'bg-blue-900/30 text-blue-300 border-blue-700/30',
+          loras: 'bg-purple-900/30 text-purple-300 border-purple-700/30',
+          vae: 'bg-green-900/30 text-green-300 border-green-700/30',
+          embeddings: 'bg-yellow-900/30 text-yellow-300 border-yellow-700/30',
+          controlnet: 'bg-red-900/30 text-red-300 border-red-700/30',
+          upscale_models: 'bg-pink-900/30 text-pink-300 border-pink-700/30',
+          clip: 'bg-indigo-900/30 text-indigo-300 border-indigo-700/30',
+          text_encoders: 'bg-cyan-900/30 text-cyan-300 border-cyan-700/30',
+        };
+        return colors[type] || 'bg-gray-800/50 text-gray-300 border-gray-700/30';
+      };
+      
+      return (
+        <div
+          key={item.path}
+          className="group flex items-center gap-3 py-2.5 px-4 hover:bg-gray-800/50 rounded-lg transition-all duration-200 border border-transparent hover:border-gray-700/50"
+          style={{ paddingLeft: `${indent + 16}px` }}
+        >
+          <RiFileLine size={16} className="text-gray-500 flex-shrink-0" />
+          <span className="text-sm text-gray-200 flex-1 truncate font-medium" title={file.name}>
+            {file.name}
+          </span>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <span className={`px-2.5 py-1 text-xs font-semibold rounded-md border ${getTypeColor(file.type)}`}>
+              {file.type}
+            </span>
+            <span className="px-2.5 py-1 text-xs font-medium text-gray-400 bg-gray-800/30 rounded-md min-w-[60px] text-right">
+              {file.formattedSize || formatFileSize(file.size)}
+            </span>
+          </div>
+        </div>
+      );
+    }
+  };
+
   useEffect(() => {
     // Fetch the selected version and extensions
     Promise.all([
@@ -443,6 +604,94 @@ export default function ActivePage() {
       fetchNodesForSpace(selectedVersion);
     }
   }, [selectedVersion]);
+
+  // Fetch models when Models tab is active
+  useEffect(() => {
+    if (activeTab === 'models' && models.length === 0 && !loadingModels) {
+      fetchModels();
+    }
+  }, [activeTab, models.length, loadingModels]);
+
+  const fetchFiles = async () => {
+    setLoadingFiles(true);
+    setImageErrors(new Set()); // Clear image errors on refresh
+    try {
+      const response = await fetch('/api/files');
+      const data = await response.json();
+      if (data.error) {
+        console.error('Error fetching files:', data.error);
+        setFiles([]);
+        setFilesGroupedByDate({});
+      } else {
+        setFiles(data.files || []);
+        setFilesGroupedByDate(data.groupedByDate || {});
+      }
+    } catch (err) {
+      console.error('Error fetching files:', err);
+      setFiles([]);
+      setFilesGroupedByDate({});
+    } finally {
+      setLoadingFiles(false);
+    }
+  };
+
+  // Fetch files when Files tab is active
+  useEffect(() => {
+    if (activeTab === 'files' && files.length === 0 && !loadingFiles) {
+      fetchFiles();
+    }
+  }, [activeTab, files.length, loadingFiles]);
+
+  const toggleDateGroup = (date: string) => {
+    setCollapsedDates(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(date)) {
+        newSet.delete(date);
+      } else {
+        newSet.add(date);
+      }
+      return newSet;
+    });
+  };
+
+  const formatDate = (dateString: string): string => {
+    const date = new Date(dateString);
+    const today = new Date();
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    
+    if (dateString === today.toISOString().split('T')[0]) {
+      return 'Today';
+    } else if (dateString === yesterday.toISOString().split('T')[0]) {
+      return 'Yesterday';
+    } else {
+      return date.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+    }
+  };
+
+  const isImageFile = (extension: string): boolean => {
+    const imageExts = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg'];
+    return imageExts.includes(extension);
+  };
+
+  const getFileIcon = (extension: string) => {
+    const imageExts = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg'];
+    const videoExts = ['.mp4', '.avi', '.mov', '.webm', '.mkv'];
+    
+    if (imageExts.includes(extension)) {
+      return <RiImageLine size={16} className="text-blue-400" />;
+    } else if (videoExts.includes(extension)) {
+      return <RiVideoLine size={16} className="text-purple-400" />;
+    } else {
+      return <RiFileTextLine size={16} className="text-gray-400" />;
+    }
+  };
+
+  const getFileImageUrl = (filePath: string): string => {
+    // Split path and encode each segment separately for catch-all route
+    const segments = filePath.split('/').map(segment => encodeURIComponent(segment));
+    return `/api/files/${segments.join('/')}`;
+  };
 
   // Auto-scroll to bottom when new restart logs arrive
   useEffect(() => {
@@ -525,6 +774,18 @@ export default function ActivePage() {
     return () => clearInterval(interval);
   }, []);
 
+  const getComfyUIUrl = () => {
+    if (typeof window === 'undefined') return 'http://localhost:8188';
+    return `http://${window.location.hostname}:8188`;
+  };
+
+  const tabs = [
+    { id: 'comfyui' as TabType, label: 'ComfyUI' },
+    { id: 'nodes' as TabType, label: 'Custom Nodes' },
+    { id: 'models' as TabType, label: 'Models' },
+    { id: 'files' as TabType, label: 'Files' },
+  ];
+
   return (
     <>
       <style>{`
@@ -537,82 +798,72 @@ export default function ActivePage() {
           to { transform: rotate(360deg); }
         }
       `}</style>
-      {/* Top Bar */}
-      <Paper
-        style={{
-          position: 'sticky',
-          top: 0,
-          zIndex: 100,
-          backgroundColor: '#1a1b1e',
-          borderBottom: '1px solid #373a40',
-          borderRadius: 0,
-        }}
-      >
-        <Container size="xl" py="md" style={{ width: '100%' }}>
-          <Group justify="space-between" align="center">
-            <Group gap="sm" align="center">
-              <ActionIcon
-                variant="subtle"
-                size="lg"
+      
+      {/* Tab-based Header */}
+      <div className="sticky top-0 z-50 bg-gray-900 border-b border-gray-800 shadow-lg">
+        <div className="w-full px-3 sm:px-4 lg:px-6">
+          <div className="flex items-center justify-between h-10">
+            {/* Left side: Home icon and tabs */}
+            <div className="flex items-center gap-3 flex-1">
+              <button
                 onClick={() => router.push('/')}
-                style={{ color: '#ffffff' }}
+                className="p-1 rounded hover:bg-gray-800 transition-colors text-gray-300 hover:text-white"
                 title="Home"
               >
-                <RiHomeLine size={20} />
-              </ActionIcon>
-              <Text size="lg" fw={600} c="#ffffff">
-                {selectedVersion || 'No space selected'}
-              </Text>
-            </Group>
-            <Group gap="sm" align="center">
-              <Group gap={0} align="center" style={{ border: '1px solid #373a40', borderRadius: '4px', overflow: 'hidden' }}>
-                <Button
-                  variant="subtle"
-                  size="sm"
-                  component="a"
-                  href={typeof window !== 'undefined' ? `http://${window.location.hostname}:8188` : 'http://localhost:8188'}
+                <RiHomeLine size={18} />
+              </button>
+              
+              {/* Tabs */}
+              <div className="flex items-center gap-4">
+                {tabs.map((tab) => (
+                  <button
+                    key={tab.id}
+                    onClick={() => setActiveTab(tab.id)}
+                    style={{ fontSize: '14px' }}
+                    className={`relative px-2 py-1 font-medium transition-colors duration-200 ${
+                      activeTab === tab.id
+                        ? 'text-white'
+                        : 'text-gray-400 hover:text-gray-300'
+                    }`}
+                  >
+                    {tab.label}
+                    {activeTab === tab.id && (
+                      <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-500"></div>
+                    )}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Right side: Actions */}
+            <div className="flex items-center gap-1.5">
+              {/* ComfyUI Status & Actions */}
+              <div className="flex items-center border border-gray-700 rounded overflow-hidden">
+                <a
+                  href={getComfyUIUrl()}
                   target="_blank"
                   rel="noopener noreferrer"
-                  leftSection={
-                    comfyUIRestarting ? (
-                      <RiCircleFill 
-                        size={8} 
-                        color="#ffd43b" 
-                        style={{ 
-                          filter: 'drop-shadow(0 0 3px #ffd43b)',
-                          animation: 'blink 1s ease-in-out infinite'
-                        }} 
-                      />
-                    ) : comfyUIOnline ? (
-                      <RiCircleFill size={8} color="#51cf66" style={{ filter: 'drop-shadow(0 0 3px #51cf66)' }} />
-                    ) : (
-                      <RiCircleFill size={8} color="#ff6b6b" />
-                    )
-                  }
-                  rightSection={<RiExternalLinkLine size={16} />}
-                  style={{
-                    color: '#0070f3',
-                    fontWeight: 'bold',
-                    borderRadius: 0,
-                    borderRight: '1px solid #373a40',
-                  }}
+                  className="px-2.5 py-1 text-xs font-medium text-blue-400 hover:text-blue-300 flex items-center gap-1.5 border-r border-gray-700"
                 >
-                  Launch ComfyUI
-                </Button>
+                  {comfyUIRestarting ? (
+                    <RiCircleFill 
+                      size={6} 
+                      color="#ffd43b" 
+                      className="animate-pulse drop-shadow-[0_0_2px_#ffd43b]"
+                    />
+                  ) : comfyUIOnline ? (
+                    <RiCircleFill size={6} color="#51cf66" className="drop-shadow-[0_0_2px_#51cf66]" />
+                  ) : (
+                    <RiCircleFill size={6} color="#ff6b6b" />
+                  )}
+                  ComfyUI 
+                  <RiExternalLinkLine size={12} />
+                </a>
                 <Menu shadow="md" width={200} position="bottom-end">
                   <Menu.Target>
-                    <Button
-                      variant="subtle"
-                      size="sm"
-                      style={{
-                        color: '#0070f3',
-                        fontWeight: 'bold',
-                        padding: '0 8px',
-                        borderRadius: 0,
-                      }}
-                    >
-                      <RiArrowDownSLine size={14} />
-                    </Button>
+                    <button className="px-1.5 py-1 text-blue-400 hover:text-blue-300">
+                      <RiArrowDownSLine size={12} />
+                    </button>
                   </Menu.Target>
                   <Menu.Dropdown>
                     <Menu.Item
@@ -624,10 +875,10 @@ export default function ActivePage() {
                     </Menu.Item>
                   </Menu.Dropdown>
                 </Menu>
-              </Group>
-              <Button
-                variant="outline"
-                size="sm"
+              </div>
+
+              {/* Export Button */}
+              <button
                 onClick={async () => {
                   if (!selectedVersion) return;
                   try {
@@ -652,212 +903,184 @@ export default function ActivePage() {
                   }
                 }}
                 disabled={!selectedVersion}
-                leftSection={<RiDownloadLine size={16} />}
-                styles={{
-                  root: {
-                    borderColor: selectedVersion ? '#373a40' : '#2c2e33',
-                    color: selectedVersion ? '#ffffff' : '#666666',
-                    '&:hover': {
-                      borderColor: selectedVersion ? '#555555' : '#2c2e33',
-                      backgroundColor: selectedVersion ? '#25262b' : 'transparent',
-                    },
-                    '&:disabled': {
-                      borderColor: '#2c2e33',
-                      color: '#666666',
-                    },
-                  },
-                }}
+                className="px-2.5 py-1 text-xs   rounded text-gray-300 hover:bg-gray-800 hover:border-gray-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
               >
-                Export
-              </Button>
-              <ActionIcon
-                variant="subtle"
-                size="lg"
+                <RiDownloadLine size={14} />
+              </button>
+
+              {/* History Button */}
+              <button
                 onClick={handleShowChanges}
-                style={{
-                  color: '#51cf66',
-                }}
+                className="p-1 rounded hover:bg-gray-800 transition-colors text-green-400 hover:text-green-300"
                 title="History"
               >
-                <RiHistoryLine size={20} />
-              </ActionIcon>
-              <ActionIcon
-                variant={logsSidebarOpen ? 'filled' : 'subtle'}
-                size="lg"
+                <RiHistoryLine size={16} />
+              </button>
+
+              {/* Logs Toggle */}
+              <button
                 onClick={() => setLogsSidebarOpen(!logsSidebarOpen)}
-                style={{
-                  color: logsSidebarOpen ? '#ffffff' : '#888888',
-                  backgroundColor: logsSidebarOpen ? '#0070f3' : 'transparent',
-                }}
+                className={`p-1 rounded transition-colors ${
+                  logsSidebarOpen 
+                    ? 'bg-blue-600 text-white' 
+                    : 'text-gray-400 hover:text-white hover:bg-gray-800'
+                }`}
                 title="Toggle Logs"
               >
-                <RiFileListLine size={20} />
-              </ActionIcon>
-            </Group>
-          </Group>
-        </Container>
-      </Paper>
+                <RiFileListLine size={16} />
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
 
-      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', backgroundColor: '#1a1b1e', paddingTop: '2rem', paddingBottom: '2rem' }}>
-        <Container size="xl" py="xl" style={{ width: '100%' }}>
-          <Stack gap="md">
-            <div>
-              <Stack gap="md" mb="md">
-                <Group gap="sm" align="center">
-                  {(() => {
-                    const selectedSpace = spaces.find(s => s.name === selectedVersion);
-                    return selectedSpace ? (
-                      <>
-                        <Badge
-                          size="sm"
-                          variant="outline"
-                          style={{
-                            borderColor: '#a78bfa',
-                            color: '#a78bfa',
-                            backgroundColor: 'transparent',
-                          }}
-                        >
-                          Python: {selectedSpace.pythonVersion}
-                        </Badge>
-                        <Badge
-                          size="sm"
-                          variant="outline"
-                          style={{
-                            borderColor: '#a78bfa',
-                            color: '#a78bfa',
-                            backgroundColor: 'transparent',
-                          }}
-                        >
-                          ComfyUI: {selectedSpace.comfyUIVersion}
-                        </Badge>
-                      </>
-                    ) : null;
-                  })()}
-                </Group>
-                <Group justify="space-between" align="center">
-                  <Title order={2}>Nodes</Title>
-                  <Group gap="sm" align="center">
-                    <ActionIcon
-                      variant="subtle"
-                      color="gray"
-                      size="md"
-                      onClick={() => {
-                        if (selectedVersion && !refreshingNodes) {
-                          fetchNodesForSpace(selectedVersion, true);
-                        }
-                      }}
-                      title="Refresh Custom Nodes"
-                      disabled={refreshingNodes}
-                      style={{ 
-                        color: refreshingNodes ? '#555555' : '#888888',
-                        cursor: refreshingNodes ? 'not-allowed' : 'pointer',
-                        opacity: refreshingNodes ? 0.6 : 1,
-                        ...(refreshingNodes && {
-                          animation: 'spin 1s linear infinite',
-                        }),
-                      }}
-                    >
-                      <RiRefreshLine 
-                        size={18} 
-                        style={refreshingNodes ? {
-                          animation: 'spin 1s linear infinite',
-                        } : {}}
-                      />
-                    </ActionIcon>
-                    <Button
-                      variant="filled"
-                      size="xs"
-                      leftSection={<RiAddLine size={14} />}
-                      onClick={() => {
-                        router.push('/install-node');
-                      }}
-                      style={{
-                        backgroundColor: '#0070f3',
-                        color: '#ffffff',
-                      }}
-                    >
-                      Install Custom Node
-                    </Button>
-                    {nodes.length > 0 && (
-                      <Text size="sm" c="dimmed">
-                        {nodes.filter(n => n.status === 'active').length} active, {nodes.filter(n => n.status === 'failed').length} failed
-                      </Text>
-                    )}
-                  </Group>
-                </Group>
-              </Stack>
-              {error ? (
-                <Card padding="md" radius="md" style={{ backgroundColor: '#25262b', border: '1px solid #ff6b6b' }}>
-                  <Text c="red" size="sm">Error: {error}</Text>
-                </Card>
-              ) : loading ? (
-                <Text c="dimmed">Loading nodes...</Text>
-              ) : nodes.length === 0 ? (
-                <Text c="dimmed">No nodes found</Text>
-              ) : (
-                <Stack gap="xs">
+      {/* Tab Content */}
+      <div className="min-h-screen bg-gray-900">
+        {/* ComfyUI Tab */}
+        {activeTab === 'comfyui' && (
+          <div className="h-[calc(100vh-2.5rem)] w-full">
+            {comfyUIOnline ? (
+              <iframe
+                src={getComfyUIUrl()}
+                className="w-full h-full border-0"
+                title="ComfyUI"
+              />
+            ) : (
+              <div className="flex items-center justify-center h-full">
+                <div className="text-center">
+                  <RiCloseCircleFill size={48} className="mx-auto mb-4 text-red-500" />
+                  <h3 className="text-xl font-semibold text-white mb-2">ComfyUI is not available</h3>
+                  <p className="text-gray-400 mb-4">Please ensure ComfyUI is running on port 8188</p>
+                  <button
+                    onClick={handleRestartComfyUI}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                    disabled={!selectedVersion}
+                  >
+                    Restart ComfyUI
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Custom Nodes Tab */}
+        {activeTab === 'nodes' && (
+          <div className="w-full px-4 sm:px-6 lg:px-8 py-6">
+            {/* Header */}
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <h2 className="text-2xl font-bold text-white mb-1">Custom Nodes</h2>
+                <p className="text-sm text-gray-400">Manage your ComfyUI custom nodes and extensions</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    if (selectedVersion && !refreshingNodes) {
+                      fetchNodesForSpace(selectedVersion, true);
+                    }
+                  }}
+                  disabled={refreshingNodes}
+                  className="flex items-center gap-2 px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-gray-600 text-gray-300 hover:text-white rounded-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                  title="Refresh Custom Nodes"
+                >
+                  <RiRefreshLine 
+                    size={16} 
+                    className={refreshingNodes ? 'animate-spin' : ''}
+                  />
+                  <span className="text-sm font-medium">Refresh</span>
+                </button>
+                <button
+                  onClick={() => router.push('/install-node')}
+                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-all duration-200"
+                >
+                  <RiAddLine size={16} />
+                  <span className="text-sm font-medium">Install Node</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Space Info Badges */}
+            {(() => {
+              const selectedSpace = spaces.find(s => s.name === selectedVersion);
+              return selectedSpace ? (
+                <div className="flex items-center gap-2 mb-6">
+                  <span className="px-3 py-1.5 text-xs font-medium border border-purple-500/50 text-purple-400 bg-purple-900/20 rounded-lg">
+                    Python: {selectedSpace.pythonVersion}
+                  </span>
+                  <span className="px-3 py-1.5 text-xs font-medium border border-purple-500/50 text-purple-400 bg-purple-900/20 rounded-lg">
+                    ComfyUI: {selectedSpace.comfyUIVersion}
+                  </span>
+                  {nodes.length > 0 && (
+                    <span className="px-3 py-1.5 text-xs font-medium text-gray-400 bg-gray-800/50 border border-gray-700/50 rounded-lg">
+                      {nodes.filter(n => n.status === 'active').length} active, {nodes.filter(n => n.status === 'failed').length} failed
+                    </span>
+                  )}
+                </div>
+              ) : null;
+            })()}
+
+            {/* Content */}
+            {error ? (
+              <div className="p-4 bg-red-900/20 border border-red-500/50 rounded-lg">
+                <p className="text-red-400 text-sm font-medium">Error: {error}</p>
+              </div>
+            ) : loading ? (
+              <div className="flex flex-col items-center justify-center py-16">
+                <RiRefreshLine size={32} className="text-gray-500 animate-spin mb-4" />
+                <p className="text-gray-400 font-medium">Loading nodes...</p>
+                <p className="text-sm text-gray-500 mt-1">Scanning custom nodes directory</p>
+              </div>
+            ) : nodes.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-16 bg-gray-800/30 border border-gray-700/50 rounded-xl">
+                <RiFileListLine size={48} className="text-gray-600 mb-4" />
+                <p className="text-gray-300 font-semibold text-lg mb-1">No nodes found</p>
+                <p className="text-sm text-gray-500 text-center max-w-md">
+                  Install custom nodes to extend ComfyUI functionality
+                </p>
+              </div>
+            ) : (
+              <div className="bg-gray-800/50 backdrop-blur-sm border border-gray-700/50 rounded-xl shadow-xl overflow-hidden">
+                <div className="divide-y divide-gray-700/30">
                   {nodes.map((node, index) => (
-                    <Paper
+                    <div
                       key={index}
-                      p="sm"
-                      style={{
-                        backgroundColor: '#25262b',
-                        border: node.status === 'failed' 
-                          ? '1px solid #ff6b6b' 
-                          : '1px solid #373a40',
-                        cursor: node.extensionPaths && node.extensionPaths.length > 0 ? 'pointer' : 'default',
-                        transition: 'background-color 0.2s',
-                      }}
                       onClick={() => {
                         if (node.extensionPaths && node.extensionPaths.length > 0) {
                           setSelectedNode(node);
                           setModalOpened(true);
                         }
                       }}
-                      onMouseEnter={(e) => {
-                        e.currentTarget.style.backgroundColor = '#2d2f35';
-                      }}
-                      onMouseLeave={(e) => {
-                        e.currentTarget.style.backgroundColor = '#25262b';
-                      }}
+                      className={`px-4 py-3 hover:bg-gray-800/50 transition-all ${
+                        node.extensionPaths && node.extensionPaths.length > 0 ? 'cursor-pointer' : 'cursor-default'
+                      } ${node.status === 'failed' ? 'bg-red-900/10' : ''}`}
                     >
-                      <Group gap="xs" align="center" justify="space-between" wrap="nowrap">
-                        <Group gap="xs" align="center" style={{ flex: 1, minWidth: 0 }}>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3 flex-1 min-w-0">
                           {node.status === 'active' ? (
-                            <RiCheckboxCircleFill size={16} color="#51cf66" />
+                            <RiCheckboxCircleFill size={18} className="text-green-500 flex-shrink-0" />
                           ) : node.status === 'failed' ? (
-                            <RiCloseCircleFill size={16} color="#ff6b6b" />
+                            <RiCloseCircleFill size={18} className="text-red-500 flex-shrink-0" />
                           ) : (
-                            <RiCloseCircleFill size={16} color="#ff6b6b" />
+                            <RiCloseCircleFill size={18} className="text-red-500 flex-shrink-0" />
                           )}
-                          <Text size="sm" fw={500} c="gray.0" style={{ flex: 1 }}>
-                            {node.name}
-                          </Text>
-                        </Group>
-                        <Group gap="xs" onClick={(e) => e.stopPropagation()}>
+                          <span className="text-sm font-semibold text-gray-200 truncate">{node.name}</span>
+                        </div>
+                        <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
                           {node.githubUrl && (
-                            <ActionIcon
-                              variant="subtle"
-                              color="blue"
-                              size="sm"
+                            <button
                               onClick={() => handleUpdate(node)}
+                              className="p-2 rounded-lg hover:bg-gray-700 text-blue-400 hover:text-blue-300 transition-colors"
                               title="Update"
-                              style={{ color: '#4dabf7' }}
                             >
                               <RiPencilLine size={16} />
-                            </ActionIcon>
+                            </button>
                           )}
                           <Menu shadow="md" width={200} position="bottom-end">
                             <Menu.Target>
-                              <ActionIcon
-                                variant="subtle"
-                                color="gray"
-                                size="sm"
-                                title="More options"
-                                style={{ color: '#ffffff' }}
-                              >
+                              <button className="p-2 rounded-lg hover:bg-gray-700 text-white transition-colors">
                                 <RiMoreFill size={16} />
-                              </ActionIcon>
+                              </button>
                             </Menu.Target>
                             <Menu.Dropdown>
                               <Menu.Item
@@ -869,83 +1092,235 @@ export default function ActivePage() {
                               </Menu.Item>
                             </Menu.Dropdown>
                           </Menu>
-                        </Group>
-                      </Group>
-                    </Paper>
+                        </div>
+                      </div>
+                    </div>
                   ))}
-                </Stack>
+                </div>
+              </div>
+            )}
+
+            {/* Dependencies Section */}
+            <div className="mt-8">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <h2 className="text-2xl font-bold text-white">Dependencies</h2>
+                  <button
+                    onClick={() => setDependenciesExpanded(!dependenciesExpanded)}
+                    className="p-1.5 rounded-lg hover:bg-gray-800 text-gray-400 hover:text-white transition-colors"
+                    title={dependenciesExpanded ? 'Collapse' : 'Expand'}
+                  >
+                    {dependenciesExpanded ? <RiArrowUpSLine size={16} /> : <RiArrowDownSLine size={16} />}
+                  </button>
+                </div>
+                {dependencies.length > 0 && (
+                  <span className="text-sm text-gray-400">{dependencies.length} dependencies</span>
+                )}
+              </div>
+              {dependenciesExpanded && (
+                <div className="bg-gray-800/50 backdrop-blur-sm border border-gray-700/50 rounded-xl shadow-xl overflow-hidden p-4">
+                  {loading ? (
+                    <p className="text-gray-400 text-sm">Loading dependencies...</p>
+                  ) : dependencies.length === 0 ? (
+                    <p className="text-gray-400 text-sm">No dependencies found</p>
+                  ) : (
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
+                      {dependencies.map((dep, index) => (
+                        <div
+                          key={index}
+                          className="p-3 bg-gray-800/50 border border-gray-700/50 rounded-lg hover:shadow-lg hover:-translate-y-0.5 transition-all"
+                        >
+                          <div className="space-y-1">
+                            <p className="text-xs font-medium text-white truncate">{dep.name}</p>
+                            <p className="text-xs text-gray-400 font-mono">
+                              {dep.version === '*' ? 'any version' : dep.version}
+                            </p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               )}
+            </div>
+          </div>
+        )}
+
+        {/* Models Tab */}
+        {activeTab === 'models' && (
+          <div className="w-full px-4 sm:px-6 lg:px-8 py-6">
+            {/* Header */}
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <h2 className="text-2xl font-bold text-white mb-1">Models</h2>
+                <p className="text-sm text-gray-400">Browse and manage your ComfyUI models</p>
+              </div>
+              <button
+                onClick={fetchModels}
+                disabled={loadingModels}
+                className="flex items-center gap-2 px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-gray-600 text-gray-300 hover:text-white rounded-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                title="Refresh Models"
+              >
+                <RiRefreshLine 
+                  size={16} 
+                  className={loadingModels ? 'animate-spin' : ''}
+                />
+                <span className="text-sm font-medium">Refresh</span>
+              </button>
             </div>
 
-            <div style={{ marginTop: '2rem' }}>
-              <Stack gap="md" mb="md">
-                <Group justify="space-between" align="center">
-                  <Group gap="sm" align="center">
-                    <Title order={2}>Dependencies</Title>
-                    <ActionIcon
-                      variant="subtle"
-                      size="sm"
-                      onClick={() => setDependenciesExpanded(!dependenciesExpanded)}
-                      style={{ color: '#ffffff' }}
-                      title={dependenciesExpanded ? 'Collapse' : 'Expand'}
-                    >
-                      {dependenciesExpanded ? <RiArrowUpSLine size={16} /> : <RiArrowDownSLine size={16} />}
-                    </ActionIcon>
-                  </Group>
-                  {dependencies.length > 0 && (
-                    <Text size="sm" c="dimmed">
-                      {dependencies.length} dependencies
-                    </Text>
-                  )}
-                </Group>
-              </Stack>
-              {dependenciesExpanded && (
-                <>
-                  {loading ? (
-                    <Text c="dimmed">Loading dependencies...</Text>
-                  ) : dependencies.length === 0 ? (
-                    <Text c="dimmed">No dependencies found</Text>
-                  ) : (
-                    <Grid gutter="sm">
-                      {dependencies.map((dep, index) => (
-                        <Grid.Col key={index} span={{ base: 12, sm: 6, md: 4, lg: 2 }}>
-                          <Card
-                            padding="sm"
-                            radius="md"
-                            style={{
-                              backgroundColor: '#25262b',
-                              border: '1px solid #373a40',
-                              height: '100%',
-                              transition: 'transform 0.2s, box-shadow 0.2s',
-                            }}
-                            onMouseEnter={(e) => {
-                              e.currentTarget.style.transform = 'translateY(-2px)';
-                              e.currentTarget.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.3)';
-                            }}
-                            onMouseLeave={(e) => {
-                              e.currentTarget.style.transform = 'translateY(0)';
-                              e.currentTarget.style.boxShadow = 'none';
-                            }}
-                          >
-                            <Stack gap="xs">
-                              <Text size="xs" fw={500} c="gray.0" style={{ flex: 1 }}>
-                                {dep.name}
-                              </Text>
-                              <Text size="xs" c="#888888" style={{ fontFamily: 'monospace', fontSize: '10px' }}>
-                                {dep.version === '*' ? 'any version' : dep.version}
-                              </Text>
-                            </Stack>
-                          </Card>
-                        </Grid.Col>
-                      ))}
-                    </Grid>
-                  )}
-                </>
-              )}
+            {/* Content */}
+            {loadingModels ? (
+              <div className="flex flex-col items-center justify-center py-16">
+                <RiRefreshLine size={32} className="text-gray-500 animate-spin mb-4" />
+                <p className="text-gray-400 font-medium">Loading models...</p>
+                <p className="text-sm text-gray-500 mt-1">Scanning directory structure</p>
+              </div>
+            ) : models.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-16 bg-gray-800/30 border border-gray-700/50 rounded-xl">
+                <RiFileListLine size={48} className="text-gray-600 mb-4" />
+                <p className="text-gray-300 font-semibold text-lg mb-1">No models found</p>
+                <p className="text-sm text-gray-500 text-center max-w-md">
+                  Models will appear here once they are added to the ComfyUI models directory
+                </p>
+              </div>
+            ) : (
+              <div className="bg-gray-800/50 backdrop-blur-sm border border-gray-700/50 rounded-xl shadow-xl overflow-hidden">
+                <div className="p-2">
+                  {models.map(item => renderModelItem(item))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Files Tab */}
+        {activeTab === 'files' && (
+          <div className="w-full px-3 sm:px-4 lg:px-6 py-4">
+            {/* Header */}
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h2 className="text-lg font-bold text-white">Output Files</h2>
+                <p className="text-xs text-gray-400">Browse generated outputs from ComfyUI</p>
+              </div>
+              <button
+                onClick={fetchFiles}
+                disabled={loadingFiles}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-gray-600 text-gray-300 hover:text-white rounded-md transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                title="Refresh Files"
+              >
+                <RiRefreshLine 
+                  size={14} 
+                  className={loadingFiles ? 'animate-spin' : ''}
+                />
+                <span className="text-xs font-medium">Refresh</span>
+              </button>
             </div>
-          </Stack>
-        </Container>
+
+            {/* Content */}
+            {loadingFiles ? (
+              <div className="flex flex-col items-center justify-center py-12">
+                <RiRefreshLine size={24} className="text-gray-500 animate-spin mb-3" />
+                <p className="text-xs text-gray-400 font-medium">Loading files...</p>
+                <p className="text-[10px] text-gray-500 mt-0.5">Scanning output directory</p>
+              </div>
+            ) : files.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-12 bg-gray-800/30 border border-gray-700/50 rounded-lg">
+                <RiFileListLine size={32} className="text-gray-600 mb-3" />
+                <p className="text-sm text-gray-300 font-semibold mb-0.5">No files found</p>
+                <p className="text-xs text-gray-500 text-center max-w-md">
+                  Generated outputs will appear here once ComfyUI creates files in the output directory
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {Object.entries(filesGroupedByDate)
+                  .sort(([dateA], [dateB]) => dateB.localeCompare(dateA)) // Sort dates descending (most recent first)
+                  .map(([date, dateFiles]) => {
+                    const isCollapsed = collapsedDates.has(date);
+                    return (
+                      <div key={date} className="bg-gray-800/50 backdrop-blur-sm border border-gray-700/50 rounded-lg shadow-lg overflow-hidden">
+                        {/* Date Header */}
+                        <div
+                          className="flex items-center justify-between px-3 py-2 bg-gray-800/70 border-b border-gray-700/50 cursor-pointer hover:bg-gray-800/90 transition-colors"
+                          onClick={() => toggleDateGroup(date)}
+                        >
+                          <div className="flex items-center gap-2">
+                            <RiArrowDownSLine 
+                              size={12} 
+                              className={`text-gray-400 transition-transform ${isCollapsed ? '-rotate-90' : ''}`}
+                            />
+                            <h3 className="text-sm font-semibold text-white">{formatDate(date)}</h3>
+                            <span className="px-1.5 py-0.5 text-[10px] font-medium text-gray-400 bg-gray-700/50 rounded">
+                              {dateFiles.length} {dateFiles.length === 1 ? 'file' : 'files'}
+                            </span>
+                          </div>
+                          <div className="text-xs text-gray-500">
+                            {dateFiles.reduce((sum, file) => sum + file.size, 0) > 0 && (
+                              <span>{formatFileSize(dateFiles.reduce((sum, file) => sum + file.size, 0))}</span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Files Grid */}
+                        {!isCollapsed && (
+                          <div className="p-3">
+                            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8 gap-3">
+                              {dateFiles.map((file, index) => {
+                                const isImage = isImageFile(file.extension);
+                                return (
+                                  <div
+                                    key={`${file.path}-${index}`}
+                                    className="group cursor-pointer"
+                                  >
+                                    <div className="aspect-square bg-gray-800/50 border border-gray-700/50 rounded-md overflow-hidden hover:border-gray-600 transition-all hover:shadow-lg">
+                                      {isImage && !imageErrors.has(file.path) ? (
+                                        <img
+                                          src={getFileImageUrl(file.path)}
+                                          alt={file.name}
+                                          className="w-full h-full object-cover"
+                                          onError={() => {
+                                            setImageErrors(prev => new Set(prev).add(file.path));
+                                          }}
+                                        />
+                                      ) : (
+                                        <div className="w-full h-full flex flex-col items-center justify-center p-2 text-gray-500">
+                                          {getFileIcon(file.extension)}
+                                        </div>
+                                      )}
+                                    </div>
+                                    <div className="mt-1.5 px-1">
+                                      <p className="text-[10px] text-gray-300 truncate text-center font-medium" title={file.name}>
+                                        {file.name}
+                                      </p>
+                                      <div className="flex items-center justify-center gap-1.5 mt-0.5">
+                                        <span className="text-[9px] text-gray-500">
+                                          {file.formattedSize}
+                                        </span>
+                                        <span className="text-[9px] text-gray-600">•</span>
+                                        <span className="text-[9px] text-gray-500">
+                                          {new Date(file.created).toLocaleTimeString('en-US', { 
+                                            hour: '2-digit', 
+                                            minute: '2-digit'
+                                          })}
+                                        </span>
+                                      </div>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+              </div>
+            )}
+          </div>
+        )}
       </div>
+
       <LogSidebar isOpen={logsSidebarOpen} onToggle={setLogsSidebarOpen} />
       {selectedNode && (
         <NodeTreeModal
@@ -1278,4 +1653,3 @@ export default function ActivePage() {
     </>
   );
 }
-

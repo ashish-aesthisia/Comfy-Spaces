@@ -361,6 +361,310 @@ async function ensurePip(
   }
 }
 
+async function isGpuAvailable(): Promise<boolean> {
+  try {
+    const { stdout } = await withTimeout(
+      execFileAsync('nvidia-smi', ['--query-gpu=name', '--format=csv,noheader']),
+      5000,
+      'Timeout checking for GPU'
+    );
+    return stdout.trim().length > 0;
+  } catch (error) {
+    // nvidia-smi not available or failed, assume CPU
+    return false;
+  }
+}
+
+// CUDA version to PyTorch index URL mapping
+const CUDA_TO_TORCH_INDEX: Record<string, string> = {
+  "13.0": "https://download.pytorch.org/whl/cu130",
+  "12.8": "https://download.pytorch.org/whl/cu128",
+  "12.6": "https://download.pytorch.org/whl/cu126",
+};
+
+// Compare two version strings (e.g., "12.9" vs "13.0")
+// Returns: -1 if v1 < v2, 0 if v1 === v2, 1 if v1 > v2
+function compareVersions(v1: string, v2: string): number {
+  const parts1 = v1.split('.').map(Number);
+  const parts2 = v2.split('.').map(Number);
+  const maxLength = Math.max(parts1.length, parts2.length);
+  
+  for (let i = 0; i < maxLength; i++) {
+    const part1 = parts1[i] || 0;
+    const part2 = parts2[i] || 0;
+    if (part1 < part2) return -1;
+    if (part1 > part2) return 1;
+  }
+  return 0;
+}
+
+// Find the highest supported CUDA version ≤ installed version
+function findCompatibleCudaIndex(installedCudaVersion: string): string | null {
+  const supportedVersions = Object.keys(CUDA_TO_TORCH_INDEX).sort((a, b) => 
+    compareVersions(b, a) // Sort descending
+  );
+  
+  // Find the highest supported version that is ≤ installed version
+  for (const supportedVersion of supportedVersions) {
+    if (compareVersions(supportedVersion, installedCudaVersion) <= 0) {
+      return CUDA_TO_TORCH_INDEX[supportedVersion];
+    }
+  }
+  
+  // No compatible version found
+  return null;
+}
+
+// Detect CUDA version using nvcc
+async function getCudaVersion(): Promise<string | null> {
+  try {
+    const { stdout } = await withTimeout(
+      execFileAsync('nvcc', ['--version']),
+      5000,
+      'Timeout checking CUDA version'
+    );
+    // nvcc --version output format:
+    // nvcc: NVIDIA (R) Cuda compiler driver
+    // Copyright (c) 2005-2024 NVIDIA Corporation
+    // Built on ...
+    // Cuda compilation tools, release 12.4, V12.4.xxx
+    const versionMatch = stdout.match(/release\s+(\d+\.\d+)/i);
+    if (versionMatch) {
+      return versionMatch[1];
+    }
+    return null;
+  } catch (error) {
+    // nvcc not available or failed
+    return null;
+  }
+}
+
+// Get the appropriate PyTorch index URL based on GPU/CUDA availability
+async function getTorchIndexUrl(): Promise<{ indexUrl: string | null; cudaVersion: string | null }> {
+  const hasGpu = await isGpuAvailable();
+  
+  if (!hasGpu) {
+    return { indexUrl: null, cudaVersion: null };
+  }
+  
+  const cudaVersion = await getCudaVersion();
+  if (!cudaVersion) {
+    // GPU detected but CUDA version not available
+    // Fall back to highest supported version (cu130)
+    return { indexUrl: CUDA_TO_TORCH_INDEX["13.0"], cudaVersion: null };
+  }
+  
+  const compatibleIndex = findCompatibleCudaIndex(cudaVersion);
+  if (compatibleIndex) {
+    return { indexUrl: compatibleIndex, cudaVersion };
+  }
+  
+  // No compatible version found, fall back to highest supported version
+  return { indexUrl: CUDA_TO_TORCH_INDEX["13.0"], cudaVersion };
+}
+
+async function installRequirementsFromFile(
+  requirementsPath: string,
+  pipInfo: { command: string; args: string[] },
+  spacePath: string,
+  controller: ReadableStreamDefaultController,
+  encoder: TextEncoder,
+  logFile: string,
+  runningProcesses: Array<{ process: any; kill: () => void }>,
+  isCancelled: () => boolean
+): Promise<boolean> {
+  try {
+    sendLog(controller, encoder, `[APP] Installing dependencies from ${requirementsPath}...`, logFile);
+    
+    const pipProcess = spawn(pipInfo.command, [...pipInfo.args, 'install', '-r', requirementsPath, '--upgrade-strategy', 'only-if-needed'], {
+      cwd: spacePath,
+      env: { ...process.env },
+      shell: false,
+    });
+
+    const pipProcessKill = () => {
+      if (!pipProcess.killed) {
+        pipProcess.kill('SIGTERM');
+      }
+    };
+    runningProcesses.push({ process: pipProcess, kill: pipProcessKill });
+
+    pipProcess.stdout?.on('data', (data) => {
+      const output = data.toString();
+      sendLog(controller, encoder, output.trim(), logFile);
+    });
+
+    pipProcess.stderr?.on('data', (data) => {
+      const output = data.toString();
+      sendLog(controller, encoder, output.trim(), logFile);
+    });
+
+    const pipInstallCode = await new Promise<number>((resolve) => {
+      pipProcess.on('close', (code) => {
+        const index = runningProcesses.findIndex(p => p.process === pipProcess);
+        if (index !== -1) {
+          runningProcesses.splice(index, 1);
+        }
+        resolve(code || 0);
+      });
+      pipProcess.on('error', () => {
+        const index = runningProcesses.findIndex(p => p.process === pipProcess);
+        if (index !== -1) {
+          runningProcesses.splice(index, 1);
+        }
+        resolve(1);
+      });
+    });
+
+    if (isCancelled()) {
+      return false;
+    }
+
+    if (pipInstallCode !== 0) {
+      sendLog(controller, encoder, `[WARN] Initial installation failed, attempting conflict resolution...`, logFile);
+      
+      // Read the requirements file
+      let requirementsContent = readFileSync(requirementsPath, 'utf-8');
+      const lines = requirementsContent.split('\n');
+      
+      // Known packages that often have conflicts - remove strict pins to let pip resolve
+      const conflictPronePackages = ['numpy', 'scipy', 'pandas', 'matplotlib', 'pillow'];
+      const adjustedLines = lines.map(line => {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) {
+          return line;
+        }
+        
+        for (const pkg of conflictPronePackages) {
+          const strictMatch = trimmed.match(new RegExp(`^(${pkg.replace('-', '[-_]')})\\s*==\\s*([^\\s#]+)`, 'i'));
+          if (strictMatch) {
+            const pkgName = strictMatch[1];
+            sendLog(controller, encoder, `[APP] Removing strict version pin for ${pkgName} to allow pip to resolve conflicts`, logFile);
+            return pkgName;
+          }
+        }
+        return line;
+      });
+      
+      const adjustedContent = adjustedLines.join('\n');
+      writeFileSync(requirementsPath, adjustedContent, 'utf-8');
+      
+      // Try installation again with relaxed constraints
+      const retryPipProcess = spawn(pipInfo.command, [...pipInfo.args, 'install', '-r', requirementsPath, '--upgrade-strategy', 'only-if-needed'], {
+        cwd: spacePath,
+        env: { ...process.env },
+        shell: false,
+      });
+
+      const retryPipProcessKill = () => {
+        if (!retryPipProcess.killed) {
+          retryPipProcess.kill('SIGTERM');
+        }
+      };
+      runningProcesses.push({ process: retryPipProcess, kill: retryPipProcessKill });
+
+      retryPipProcess.stdout?.on('data', (data) => {
+        const output = data.toString();
+        sendLog(controller, encoder, output.trim(), logFile);
+      });
+
+      retryPipProcess.stderr?.on('data', (data) => {
+        const output = data.toString();
+        sendLog(controller, encoder, output.trim(), logFile);
+      });
+
+      const retryPipCode = await new Promise<number>((resolve) => {
+        retryPipProcess.on('close', (code) => {
+          const index = runningProcesses.findIndex(p => p.process === retryPipProcess);
+          if (index !== -1) {
+            runningProcesses.splice(index, 1);
+          }
+          resolve(code || 0);
+        });
+        retryPipProcess.on('error', () => {
+          const index = runningProcesses.findIndex(p => p.process === retryPipProcess);
+          if (index !== -1) {
+            runningProcesses.splice(index, 1);
+          }
+          resolve(1);
+        });
+      });
+
+      if (isCancelled()) {
+        return false;
+      }
+
+      if (retryPipCode !== 0) {
+        sendLog(controller, encoder, `[ERROR] Failed to install dependencies even after conflict resolution`, logFile);
+        return false;
+      }
+      
+      sendLog(controller, encoder, `[APP] Dependencies installed successfully after conflict resolution`, logFile);
+      return true;
+    } else {
+      sendLog(controller, encoder, `[APP] Dependencies installed successfully`, logFile);
+      return true;
+    }
+  } catch (error: any) {
+    sendLog(controller, encoder, `[ERROR] Error installing requirements: ${error.message}`, logFile);
+    return false;
+  }
+}
+
+async function copyAndFilterRequirements(
+  spacePath: string,
+  controller: ReadableStreamDefaultController,
+  encoder: TextEncoder,
+  logFile: string
+): Promise<boolean> {
+  try {
+    const comfyUIPath = join(spacePath, 'ComfyUI');
+    const comfyUIRequirementsPath = join(comfyUIPath, 'requirements.txt');
+    const spaceRequirementsPath = join(spacePath, 'requirements.txt');
+
+    // Check if ComfyUI requirements.txt exists
+    if (!existsSync(comfyUIRequirementsPath)) {
+      sendLog(controller, encoder, `[WARN] ComfyUI requirements.txt not found, skipping copy`, logFile);
+      return false;
+    }
+
+    // Read ComfyUI requirements.txt
+    const requirementsContent = readFileSync(comfyUIRequirementsPath, 'utf-8');
+    const lines = requirementsContent.split('\n');
+
+    // Filter out torch packages
+    const torchPackages = ['torch', 'torchsde', 'torchvision', 'torchaudio'];
+    const filteredLines = lines.filter(line => {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) {
+        return true; // Keep comments and empty lines
+      }
+      
+      // Check if line contains any torch package (case-insensitive)
+      const lowerLine = trimmed.toLowerCase();
+      for (const pkg of torchPackages) {
+        // Match package name at start of line or after ==, >=, <=, ~=, !=
+        const regex = new RegExp(`^(${pkg.replace('-', '[-_]')})[\\s=<>!~]`, 'i');
+        if (regex.test(lowerLine)) {
+          sendLog(controller, encoder, `[APP] Filtering out: ${trimmed}`, logFile);
+          return false;
+        }
+      }
+      return true;
+    });
+
+    // Write filtered requirements to space requirements.txt
+    const filteredContent = filteredLines.join('\n');
+    writeFileSync(spaceRequirementsPath, filteredContent, 'utf-8');
+
+    sendLog(controller, encoder, `[APP] Copied and filtered requirements.txt from ComfyUI (excluded torch packages)`, logFile);
+    return true;
+  } catch (error: any) {
+    sendLog(controller, encoder, `[WARN] Error copying requirements.txt: ${error.message}`, logFile);
+    return false;
+  }
+}
+
 async function updateRequirementsTxt(
   pipCommand: string,
   pipArgs: string[],
@@ -716,6 +1020,63 @@ async function cloneComfyUI(
     }
   } catch (error: any) {
     sendLog(controller, encoder, `[ERROR] Error cloning ComfyUI: ${error.message}`, logFile);
+    return false;
+  }
+}
+
+async function cloneComfyUIManager(
+  spacePath: string,
+  controller: ReadableStreamDefaultController,
+  encoder: TextEncoder,
+  logFile: string
+): Promise<boolean> {
+  try {
+    const comfyUIPath = join(spacePath, 'ComfyUI');
+    const customNodesPath = join(comfyUIPath, 'custom_nodes');
+    const managerPath = join(customNodesPath, 'comfyui-manager');
+    
+    // Check if ComfyUI exists first
+    if (!existsSync(comfyUIPath)) {
+      sendLog(controller, encoder, `[WARN] ComfyUI not found, cannot clone ComfyUI-Manager`, logFile);
+      return false;
+    }
+
+    // Check if ComfyUI-Manager already exists
+    if (existsSync(managerPath)) {
+      sendLog(controller, encoder, `[APP] ComfyUI-Manager already exists, skipping clone`, logFile);
+      return true;
+    }
+
+    // Ensure custom_nodes directory exists
+    if (!existsSync(customNodesPath)) {
+      mkdirSync(customNodesPath, { recursive: true });
+    }
+
+    const managerUrl = 'https://github.com/ashish-aesthisia/ComfyUI-Manager';
+    sendLog(controller, encoder, `[APP] Cloning ComfyUI-Manager from ${managerUrl}...`, logFile);
+
+    try {
+      // Ensure the URL ends with .git or add it
+      let cloneUrl = managerUrl.trim();
+      if (!cloneUrl.endsWith('.git')) {
+        cloneUrl = cloneUrl.endsWith('/') ? `${cloneUrl}.git` : `${cloneUrl}.git`;
+      }
+
+      // Clone default branch (shallow clone)
+      await withTimeout(
+        execFileAsync('git', ['clone', '--depth', '1', cloneUrl, managerPath]),
+        300000, // 5 minutes timeout
+        'Timeout cloning ComfyUI-Manager'
+      );
+
+      sendLog(controller, encoder, `[APP] ComfyUI-Manager cloned successfully`, logFile);
+      return true;
+    } catch (error: any) {
+      sendLog(controller, encoder, `[ERROR] Failed to clone ComfyUI-Manager: ${error.message}`, logFile);
+      return false;
+    }
+  } catch (error: any) {
+    sendLog(controller, encoder, `[ERROR] Error cloning ComfyUI-Manager: ${error.message}`, logFile);
     return false;
   }
 }
@@ -1189,9 +1550,16 @@ export async function GET(request: NextRequest) {
           return;
         }
 
-        // Step 2: Install dependencies from space.json
+        // Step 2: Install dependencies from requirements.txt (copied from ComfyUI)
+        const spaceRequirementsPath = join(spacePath, 'requirements.txt');
         let requirementsPath: string | null = null;
-        if (existsSync(spaceJsonPath)) {
+        
+        // Check if requirements.txt exists (copied from ComfyUI)
+        if (existsSync(spaceRequirementsPath)) {
+          requirementsPath = spaceRequirementsPath;
+          sendLog(controller, encoder, `[APP] Installing dependencies from requirements.txt...`, logFilePath);
+        } else if (existsSync(spaceJsonPath)) {
+          // Fallback to space.json if requirements.txt doesn't exist
           try {
             const spaceJsonContent = readFileSync(spaceJsonPath, 'utf-8');
             const spaceJson = JSON.parse(spaceJsonContent);
@@ -1205,170 +1573,315 @@ export async function GET(request: NextRequest) {
               requirementsPath = tempRequirementsPath;
               
               sendLog(controller, encoder, `[APP] Installing dependencies from space.json...`, logFilePath);
-              
-              // Install requirements with process tracking
-              // Use --upgrade-strategy=only-if-needed to allow pip to resolve conflicts
-              // This will upgrade packages only if needed to satisfy dependencies
-              const pipProcess = spawn(pipInfo.command, [...pipInfo.args, 'install', '-r', requirementsPath, '--upgrade-strategy', 'only-if-needed'], {
-                cwd: spacePath,
-                env: { ...process.env },
-                shell: false,
-              });
-
-              const pipProcessKill = () => {
-                if (!pipProcess.killed) {
-                  pipProcess.kill('SIGTERM');
-                }
-              };
-              runningProcesses.push({ process: pipProcess, kill: pipProcessKill });
-
-              pipProcess.stdout?.on('data', (data) => {
-                const output = data.toString();
-                sendLog(controller, encoder, output.trim(), logFilePath);
-              });
-
-              pipProcess.stderr?.on('data', (data) => {
-                const output = data.toString();
-                sendLog(controller, encoder, output.trim(), logFilePath);
-              });
-
-              const pipInstallCode = await new Promise<number>((resolve) => {
-                pipProcess.on('close', (code) => {
-                  const index = runningProcesses.findIndex(p => p.process === pipProcess);
-                  if (index !== -1) {
-                    runningProcesses.splice(index, 1);
-                  }
-                  resolve(code || 0);
-                });
-                pipProcess.on('error', () => {
-                  const index = runningProcesses.findIndex(p => p.process === pipProcess);
-                  if (index !== -1) {
-                    runningProcesses.splice(index, 1);
-                  }
-                  resolve(1);
-                });
-              });
-
-              if (isCancelled) {
-                controller.close();
-                return;
-              }
-
-              if (pipInstallCode !== 0) {
-                // If installation failed, try with conflict resolution
-                // Remove strict version pins for known problematic packages and let pip resolve
-                sendLog(controller, encoder, `[WARN] Initial installation failed, attempting conflict resolution...`, logFilePath);
-                
-                // Read the requirements file
-                let requirementsContent = readFileSync(requirementsPath, 'utf-8');
-                const lines = requirementsContent.split('\n');
-                
-                // Known packages that often have conflicts - remove strict pins to let pip resolve
-                // For numpy specifically, we need to allow downgrades if needed
-                const conflictPronePackages = ['numpy', 'scipy', 'pandas', 'matplotlib', 'pillow'];
-                const adjustedLines = lines.map(line => {
-                  const trimmed = line.trim();
-                  if (!trimmed || trimmed.startsWith('#')) {
-                    return line;
-                  }
-                  
-                  for (const pkg of conflictPronePackages) {
-                    // Match package==version and remove the strict pin to let pip resolve
-                    const strictMatch = trimmed.match(new RegExp(`^(${pkg.replace('-', '[-_]')})\\s*==\\s*([^\\s#]+)`, 'i'));
-                    if (strictMatch) {
-                      const pkgName = strictMatch[1];
-                      // Remove version pin entirely - let pip find compatible version
-                      sendLog(controller, encoder, `[APP] Removing strict version pin for ${pkgName} to allow pip to resolve conflicts`, logFilePath);
-                      return pkgName; // Just the package name, no version constraint
-                    }
-                  }
-                  return line;
-                });
-                
-                const adjustedContent = adjustedLines.join('\n');
-                writeFileSync(requirementsPath, adjustedContent, 'utf-8');
-                
-                // Try installation again with relaxed constraints
-                const retryPipProcess = spawn(pipInfo.command, [...pipInfo.args, 'install', '-r', requirementsPath, '--upgrade-strategy', 'only-if-needed'], {
-                  cwd: spacePath,
-                  env: { ...process.env },
-                  shell: false,
-                });
-
-                const retryPipProcessKill = () => {
-                  if (!retryPipProcess.killed) {
-                    retryPipProcess.kill('SIGTERM');
-                  }
-                };
-                runningProcesses.push({ process: retryPipProcess, kill: retryPipProcessKill });
-
-                retryPipProcess.stdout?.on('data', (data) => {
-                  const output = data.toString();
-                  sendLog(controller, encoder, output.trim(), logFilePath);
-                });
-
-                retryPipProcess.stderr?.on('data', (data) => {
-                  const output = data.toString();
-                  sendLog(controller, encoder, output.trim(), logFilePath);
-                });
-
-                const retryPipCode = await new Promise<number>((resolve) => {
-                  retryPipProcess.on('close', (code) => {
-                    const index = runningProcesses.findIndex(p => p.process === retryPipProcess);
-                    if (index !== -1) {
-                      runningProcesses.splice(index, 1);
-                    }
-                    resolve(code || 0);
-                  });
-                  retryPipProcess.on('error', () => {
-                    const index = runningProcesses.findIndex(p => p.process === retryPipProcess);
-                    if (index !== -1) {
-                      runningProcesses.splice(index, 1);
-                    }
-                    resolve(1);
-                  });
-                });
-
-                if (isCancelled) {
-                  controller.close();
-                  return;
-                }
-
-                if (retryPipCode !== 0) {
-                  sendLog(controller, encoder, `[ERROR] Failed to install dependencies even after conflict resolution`, logFilePath);
-                  controller.close();
-                  return;
-                }
-                
-                sendLog(controller, encoder, `[APP] Dependencies installed successfully after conflict resolution`, logFilePath);
-              } else {
-                sendLog(controller, encoder, `[APP] Dependencies installed successfully`, logFilePath);
-              }
-              
-              // Clean up temporary requirements file
-              try {
-                if (existsSync(requirementsPath)) {
-                  const { unlinkSync } = require('fs');
-                  unlinkSync(requirementsPath);
-                }
-              } catch (error) {
-                // Ignore cleanup errors
-              }
-
-              // Update requirements.txt with pip list
-              await updateRequirementsTxt(pipInfo.command, pipInfo.args, spacePath, controller, encoder, logFilePath);
-            } else {
-              sendLog(controller, encoder, `[INFO] No dependencies found in space.json`, logFilePath);
-              
-              // Still update requirements.txt with currently installed packages
-              await updateRequirementsTxt(pipInfo.command, pipInfo.args, spacePath, controller, encoder, logFilePath);
             }
           } catch (error: any) {
             sendLog(controller, encoder, `[WARN] Error reading space.json: ${error.message}`, logFilePath);
           }
-        } else {
-          sendLog(controller, encoder, `[WARN] space.json not found, skipping dependency installation`, logFilePath);
         }
+        
+        if (requirementsPath) {
+          // Install requirements with process tracking
+          // Use --upgrade-strategy=only-if-needed to allow pip to resolve conflicts
+          // This will upgrade packages only if needed to satisfy dependencies
+          const pipProcess = spawn(pipInfo.command, [...pipInfo.args, 'install', '-r', requirementsPath, '--upgrade-strategy', 'only-if-needed'], {
+            cwd: spacePath,
+            env: { ...process.env },
+            shell: false,
+          });
+
+          const pipProcessKill = () => {
+            if (!pipProcess.killed) {
+              pipProcess.kill('SIGTERM');
+            }
+          };
+          runningProcesses.push({ process: pipProcess, kill: pipProcessKill });
+
+          pipProcess.stdout?.on('data', (data) => {
+            const output = data.toString();
+            sendLog(controller, encoder, output.trim(), logFilePath);
+          });
+
+          pipProcess.stderr?.on('data', (data) => {
+            const output = data.toString();
+            sendLog(controller, encoder, output.trim(), logFilePath);
+          });
+
+          const pipInstallCode = await new Promise<number>((resolve) => {
+            pipProcess.on('close', (code) => {
+              const index = runningProcesses.findIndex(p => p.process === pipProcess);
+              if (index !== -1) {
+                runningProcesses.splice(index, 1);
+              }
+              resolve(code || 0);
+            });
+            pipProcess.on('error', () => {
+              const index = runningProcesses.findIndex(p => p.process === pipProcess);
+              if (index !== -1) {
+                runningProcesses.splice(index, 1);
+              }
+              resolve(1);
+            });
+          });
+
+          if (isCancelled) {
+            controller.close();
+            return;
+          }
+
+          if (pipInstallCode !== 0) {
+            // If installation failed, try with conflict resolution
+            // Remove strict version pins for known problematic packages and let pip resolve
+            sendLog(controller, encoder, `[WARN] Initial installation failed, attempting conflict resolution...`, logFilePath);
+            
+            // Read the requirements file
+            let requirementsContent = readFileSync(requirementsPath, 'utf-8');
+            const lines = requirementsContent.split('\n');
+            
+            // Known packages that often have conflicts - remove strict pins to let pip resolve
+            // For numpy specifically, we need to allow downgrades if needed
+            const conflictPronePackages = ['numpy', 'scipy', 'pandas', 'matplotlib', 'pillow'];
+            const adjustedLines = lines.map(line => {
+              const trimmed = line.trim();
+              if (!trimmed || trimmed.startsWith('#')) {
+                return line;
+              }
+              
+              for (const pkg of conflictPronePackages) {
+                // Match package==version and remove the strict pin to let pip resolve
+                const strictMatch = trimmed.match(new RegExp(`^(${pkg.replace('-', '[-_]')})\\s*==\\s*([^\\s#]+)`, 'i'));
+                if (strictMatch) {
+                  const pkgName = strictMatch[1];
+                  // Remove version pin entirely - let pip find compatible version
+                  sendLog(controller, encoder, `[APP] Removing strict version pin for ${pkgName} to allow pip to resolve conflicts`, logFilePath);
+                  return pkgName; // Just the package name, no version constraint
+                }
+              }
+              return line;
+            });
+            
+            const adjustedContent = adjustedLines.join('\n');
+            writeFileSync(requirementsPath, adjustedContent, 'utf-8');
+            
+            // Try installation again with relaxed constraints
+            const retryPipProcess = spawn(pipInfo.command, [...pipInfo.args, 'install', '-r', requirementsPath, '--upgrade-strategy', 'only-if-needed'], {
+              cwd: spacePath,
+              env: { ...process.env },
+              shell: false,
+            });
+
+            const retryPipProcessKill = () => {
+              if (!retryPipProcess.killed) {
+                retryPipProcess.kill('SIGTERM');
+              }
+            };
+            runningProcesses.push({ process: retryPipProcess, kill: retryPipProcessKill });
+
+            retryPipProcess.stdout?.on('data', (data) => {
+              const output = data.toString();
+              sendLog(controller, encoder, output.trim(), logFilePath);
+            });
+
+            retryPipProcess.stderr?.on('data', (data) => {
+              const output = data.toString();
+              sendLog(controller, encoder, output.trim(), logFilePath);
+            });
+
+            const retryPipCode = await new Promise<number>((resolve) => {
+              retryPipProcess.on('close', (code) => {
+                const index = runningProcesses.findIndex(p => p.process === retryPipProcess);
+                if (index !== -1) {
+                  runningProcesses.splice(index, 1);
+                }
+                resolve(code || 0);
+              });
+              retryPipProcess.on('error', () => {
+                const index = runningProcesses.findIndex(p => p.process === retryPipProcess);
+                if (index !== -1) {
+                  runningProcesses.splice(index, 1);
+                }
+                resolve(1);
+              });
+            });
+
+            if (isCancelled) {
+              controller.close();
+              return;
+            }
+
+            if (retryPipCode !== 0) {
+              sendLog(controller, encoder, `[ERROR] Failed to install dependencies even after conflict resolution`, logFilePath);
+              controller.close();
+              return;
+            }
+            
+            sendLog(controller, encoder, `[APP] Dependencies installed successfully after conflict resolution`, logFilePath);
+          } else {
+            sendLog(controller, encoder, `[APP] Dependencies installed successfully`, logFilePath);
+          }
+
+          // Clean up temporary requirements file (only if it was created from space.json)
+          if (requirementsPath && requirementsPath !== spaceRequirementsPath) {
+            try {
+              if (existsSync(requirementsPath)) {
+                const { unlinkSync } = require('fs');
+                unlinkSync(requirementsPath);
+              }
+            } catch (error) {
+              // Ignore cleanup errors
+            }
+          }
+        }
+
+        // Step 2.5: Install torch packages based on device info
+        if (isCancelled) {
+          controller.close();
+          return;
+        }
+
+        sendLog(controller, encoder, `[APP] Checking for GPU availability and CUDA version...`, logFilePath);
+        const { indexUrl, cudaVersion } = await getTorchIndexUrl();
+        
+        if (indexUrl) {
+          const cudaVersionMsg = cudaVersion 
+            ? `CUDA ${cudaVersion} detected`
+            : `GPU detected (CUDA version detection unavailable)`;
+          sendLog(controller, encoder, `[APP] ${cudaVersionMsg}. Installing torch, torchvision, and torchaudio with CUDA support...`, logFilePath);
+          
+          const torchInstallArgs = [
+            ...pipInfo.args,
+            'install',
+            'torch',
+            'torchvision',
+            'torchaudio',
+            '--extra-index-url',
+            indexUrl
+          ];
+          
+          const torchInstallProcess = spawn(
+            pipInfo.command,
+            torchInstallArgs,
+            {
+              cwd: spacePath,
+              env: { ...process.env },
+              shell: false,
+            }
+          );
+
+          const torchInstallProcessKill = () => {
+            if (!torchInstallProcess.killed) {
+              torchInstallProcess.kill('SIGTERM');
+            }
+          };
+          runningProcesses.push({ process: torchInstallProcess, kill: torchInstallProcessKill });
+
+          torchInstallProcess.stdout?.on('data', (data) => {
+            const output = data.toString();
+            sendLog(controller, encoder, output.trim(), logFilePath);
+          });
+
+          torchInstallProcess.stderr?.on('data', (data) => {
+            const output = data.toString();
+            sendLog(controller, encoder, output.trim(), logFilePath);
+          });
+
+          const torchInstallCode = await new Promise<number>((resolve) => {
+            torchInstallProcess.on('close', (code) => {
+              const index = runningProcesses.findIndex(p => p.process === torchInstallProcess);
+              if (index !== -1) {
+                runningProcesses.splice(index, 1);
+              }
+              resolve(code || 0);
+            });
+            torchInstallProcess.on('error', () => {
+              const index = runningProcesses.findIndex(p => p.process === torchInstallProcess);
+              if (index !== -1) {
+                runningProcesses.splice(index, 1);
+              }
+              resolve(1);
+            });
+          });
+
+          if (isCancelled) {
+            controller.close();
+            return;
+          }
+
+          if (torchInstallCode !== 0) {
+            sendLog(controller, encoder, `[WARN] Failed to install torch packages with CUDA support, but continuing...`, logFilePath);
+          } else {
+            const successMsg = cudaVersion 
+              ? `Successfully installed torch packages with CUDA ${cudaVersion} support (using ${indexUrl})`
+              : `Successfully installed torch packages with CUDA support (using ${indexUrl})`;
+            sendLog(controller, encoder, `[APP] ${successMsg}`, logFilePath);
+          }
+        } else {
+          sendLog(controller, encoder, `[APP] CPU detected. Installing torch, torchsde, torchvision, and torchaudio...`, logFilePath);
+          
+          const torchInstallProcess = spawn(
+            pipInfo.command,
+            [
+              ...pipInfo.args,
+              'install',
+              'torch',
+              'torchsde',
+              'torchvision',
+              'torchaudio'
+            ],
+            {
+              cwd: spacePath,
+              env: { ...process.env },
+              shell: false,
+            }
+          );
+
+          const torchInstallProcessKill = () => {
+            if (!torchInstallProcess.killed) {
+              torchInstallProcess.kill('SIGTERM');
+            }
+          };
+          runningProcesses.push({ process: torchInstallProcess, kill: torchInstallProcessKill });
+
+          torchInstallProcess.stdout?.on('data', (data) => {
+            const output = data.toString();
+            sendLog(controller, encoder, output.trim(), logFilePath);
+          });
+
+          torchInstallProcess.stderr?.on('data', (data) => {
+            const output = data.toString();
+            sendLog(controller, encoder, output.trim(), logFilePath);
+          });
+
+          const torchInstallCode = await new Promise<number>((resolve) => {
+            torchInstallProcess.on('close', (code) => {
+              const index = runningProcesses.findIndex(p => p.process === torchInstallProcess);
+              if (index !== -1) {
+                runningProcesses.splice(index, 1);
+              }
+              resolve(code || 0);
+            });
+            torchInstallProcess.on('error', () => {
+              const index = runningProcesses.findIndex(p => p.process === torchInstallProcess);
+              if (index !== -1) {
+                runningProcesses.splice(index, 1);
+              }
+              resolve(1);
+            });
+          });
+
+          if (isCancelled) {
+            controller.close();
+            return;
+          }
+
+          if (torchInstallCode !== 0) {
+            sendLog(controller, encoder, `[WARN] Failed to install torch packages, but continuing...`, logFilePath);
+          } else {
+            sendLog(controller, encoder, `[APP] Successfully installed torch packages`, logFilePath);
+          }
+        }
+
+        // Update requirements.txt with pip list
+        await updateRequirementsTxt(pipInfo.command, pipInfo.args, spacePath, controller, encoder, logFilePath);
 
         // Create requirements.bkp if it doesn't exist
         await createRequirementsBkpIfMissing(pipInfo.command, pipInfo.args, spacePath, controller, encoder, logFilePath);
@@ -1406,6 +1919,40 @@ export async function GET(request: NextRequest) {
 
               if (!comfyUICloned) {
                 sendLog(controller, encoder, `[WARN] Failed to clone ComfyUI, but continuing...`, logFilePath);
+              } else {
+                // After ComfyUI is cloned, copy requirements.txt and filter out torch packages
+                sendLog(controller, encoder, `[APP] Copying requirements.txt from ComfyUI...`, logFilePath);
+                const copied = await copyAndFilterRequirements(spacePath, controller, encoder, logFilePath);
+
+                // After copying and filtering, install from requirements.txt
+                if (copied) {
+                  const spaceRequirementsPath = join(spacePath, 'requirements.txt');
+                  if (existsSync(spaceRequirementsPath)) {
+                    sendLog(controller, encoder, `[APP] Installing dependencies from copied requirements.txt...`, logFilePath);
+                    const installed = await installRequirementsFromFile(
+                      spaceRequirementsPath,
+                      pipInfo,
+                      spacePath,
+                      controller,
+                      encoder,
+                      logFilePath,
+                      runningProcesses,
+                      () => isCancelled // isCancelled is a boolean variable
+                    );
+                    if (!installed && !isCancelled) {
+                      sendLog(controller, encoder, `[WARN] Failed to install requirements from copied file, but continuing...`, logFilePath);
+                    }
+                  }
+                }
+
+                // After ComfyUI is cloned, check if we should install ComfyUI-Manager
+                const installManager = metadata.installManager !== undefined ? metadata.installManager : true;
+                if (installManager) {
+                  sendLog(controller, encoder, `[APP] Installing ComfyUI-Manager...`, logFilePath);
+                  await cloneComfyUIManager(spacePath, controller, encoder, logFilePath);
+                } else {
+                  sendLog(controller, encoder, `[INFO] ComfyUI-Manager installation skipped (installManager is false)`, logFilePath);
+                }
               }
             } else {
               sendLog(controller, encoder, `[INFO] No GitHub URL found in space.json metadata, skipping ComfyUI clone`, logFilePath);
@@ -1648,7 +2195,6 @@ export async function GET(request: NextRequest) {
             clearInterval(comfyLogWatchInterval);
           });
         }
-
       } catch (error: any) {
         sendLog(controller, encoder, `[ERROR] Activation failed: ${error.message}`, logFilePath);
         controller.close();
