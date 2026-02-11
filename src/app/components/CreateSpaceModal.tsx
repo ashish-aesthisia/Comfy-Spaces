@@ -24,7 +24,8 @@ export default function CreateSpaceModal({ opened, onClose, onSuccess }: CreateS
   const [branch, setBranch] = useState('');
   const [commitId, setCommitId] = useState('');
   const [installManager, setInstallManager] = useState(true); // Default: true
-  
+  const [useSharedModels, setUseSharedModels] = useState(true); // Default: enabled
+
   // Default ComfyUI launch args
   const defaultComfyUIArgs = '--listen 0.0.0.0';
   const [selectedRelease, setSelectedRelease] = useState<string | null>(null);
@@ -105,6 +106,7 @@ export default function CreateSpaceModal({ opened, onClose, onSuccess }: CreateS
           commitId: commitId || undefined,
           releaseTag: selectedRelease || undefined,
           installManager,
+          useSharedModels,
         }),
       });
 
@@ -136,6 +138,7 @@ export default function CreateSpaceModal({ opened, onClose, onSuccess }: CreateS
       setCommitId('');
       setSelectedRelease(null);
       setInstallManager(true); // Reset to default
+      setUseSharedModels(true); // Reset to default
       setError(null);
       setSuccess(false);
       onClose();
@@ -430,6 +433,20 @@ export default function CreateSpaceModal({ opened, onClose, onSuccess }: CreateS
               track: { backgroundColor: installManager ? '#0070f3' : '#373a40' },
             }}
           />
+          
+          <Switch
+            label="Use shared models"
+            description="Use the shared models directory (/data/models) instead of space-specific models directory"
+            checked={useSharedModels}
+            onChange={(e) => setUseSharedModels(e.currentTarget.checked)}
+            disabled={creating}
+            styles={{
+              label: { color: '#ffffff', fontWeight: 500 },
+              description: { color: '#888888', fontSize: '12px', marginTop: '4px' },
+              track: { backgroundColor: useSharedModels ? '#0070f3' : '#373a40' },
+            }}
+          />
+          
         </Stack>
 
         <Group justify="flex-end" mt="xl" pt="md" style={{ borderTop: '1px solid #373a40' }}>
@@ -465,7 +482,7 @@ export default function CreateSpaceModal({ opened, onClose, onSuccess }: CreateS
               },
             }}
           >
-            Launch Space
+            Create Space
           </Button>
         </Group>
       </Stack>

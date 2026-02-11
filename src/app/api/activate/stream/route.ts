@@ -1081,6 +1081,72 @@ async function cloneComfyUIManager(
   }
 }
 
+/** Template for extra_model_paths.yaml comfyui section; __MODEL_DIR__ and __DOWNLOAD_MODEL_BASE__ are replaced at write time. */
+const EXTRA_MODEL_PATHS_COMFYUI_TEMPLATE = `comfyui:
+  base_path: __MODEL_DIR__
+  is_default: true
+  download_model_base: __DOWNLOAD_MODEL_BASE__
+  checkpoints: checkpoints/
+  text_encoders: |
+    text_encoders/
+    clip/   # legacy location still supported
+  clip_vision: clip_vision/
+  configs: configs/
+  controlnet: controlnet/
+  diffusion_models: |
+    diffusion_models
+    unet
+  embeddings: embeddings/
+  loras: loras/
+  upscale_models: upscale_models/
+  vae: vae/
+  audio_encoders: audio_encoders/
+  model_patches: model_patches/
+`;
+
+async function ensureExtraModelPathsYaml(
+  spacePath: string,
+  controller: ReadableStreamDefaultController,
+  encoder: TextEncoder,
+  logFile: string
+): Promise<void> {
+  try {
+    const comfyUIPath = join(spacePath, 'ComfyUI');
+    if (!existsSync(comfyUIPath)) {
+      sendLog(controller, encoder, `[INFO] ComfyUI not found, skipping extra_model_paths.yaml`, logFile);
+      return;
+    }
+
+    const spaceJsonPath = join(spacePath, 'space.json');
+    if (!existsSync(spaceJsonPath)) {
+      sendLog(controller, encoder, `[INFO] space.json not found, skipping extra_model_paths.yaml`, logFile);
+      return;
+    }
+
+    const spaceJson = JSON.parse(readFileSync(spaceJsonPath, 'utf-8'));
+    const modelDir = spaceJson.metadata?.model_dir;
+    const modelDirStr = typeof modelDir === 'string' ? modelDir.trim() : '';
+
+    if (!modelDirStr) {
+      sendLog(controller, encoder, `[INFO] model_dir not set in space.json, skipping extra_model_paths.yaml`, logFile);
+      return;
+    }
+
+    const basePath = modelDirStr.endsWith('/') ? modelDirStr : `${modelDirStr}/`;
+    const cwd = process.cwd();
+    const downloadModelBase = join(cwd, 'data', 'models') + '/';
+    const content = EXTRA_MODEL_PATHS_COMFYUI_TEMPLATE
+      .replace(/__MODEL_DIR__/g, basePath)
+      .replace(/__DOWNLOAD_MODEL_BASE__/g, downloadModelBase);
+
+    const yamlPath = join(comfyUIPath, 'extra_model_paths.yaml');
+    writeFileSync(yamlPath, content, 'utf-8');
+    sendLog(controller, encoder, `[APP] extra_model_paths.yaml created/updated with model_dir: ${modelDirStr}`, logFile);
+  } catch (error: any) {
+    sendLog(controller, encoder, `[WARN] Error ensuring extra_model_paths.yaml: ${error.message}`, logFile);
+  }
+}
+
 async function cloneCustomNodes(
   spacePath: string,
   nodes: any[],
@@ -1960,6 +2026,11 @@ export async function GET(request: NextRequest) {
           } catch (error: any) {
             sendLog(controller, encoder, `[WARN] Error reading space.json for ComfyUI clone: ${error.message}`, logFilePath);
           }
+        }
+
+        // Step 2.55: Create or update extra_model_paths.yaml from space.json model_dir (when ComfyUI exists)
+        if (existsSync(join(spacePath, 'ComfyUI'))) {
+          await ensureExtraModelPathsYaml(spacePath, controller, encoder, logFilePath);
         }
 
         if (isCancelled) {
