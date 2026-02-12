@@ -17,6 +17,10 @@ A web-based manager for multiple ComfyUI workspaces with dependency tracking and
   <img src="https://github.com/ashish-aesthisia/Comfy-Spaces/blob/main/screenshot/image.png?raw=true" width="850"/>
 </p>
 
+<p align="center">
+  <img src="https://github.com/ashish-aesthisia/Comfy-Spaces/blob/main/screenshot/dashboard.png?raw=true" width="850"/>
+</p>
+
 ---
 
 ## ✨ Features
@@ -28,7 +32,7 @@ A web-based manager for multiple ComfyUI workspaces with dependency tracking and
 - **Web Interface** — Modern UI for managing spaces, nodes, and dependencies  
 
 
-## what's New?
+## What's New?
 
 - Shared model across different workspaces. 
 - Run In app ConfyUI
