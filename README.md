@@ -20,6 +20,10 @@ A web-based manager for multiple ComfyUI workspaces with dependency tracking and
 <p align="center">
   <img src="https://github.com/ashish-aesthisia/Comfy-Spaces/blob/main/screenshot/dashboard.png?raw=true" width="850"/>
 </p>
+<p align="center">
+  Snart dependency check for custom node installtion
+  <img src="https://github.com/ashish-aesthisia/Comfy-Spaces/blob/main/screenshot/install_node.png?raw=true" width="850"/>
+</p>
 
 ---
 
