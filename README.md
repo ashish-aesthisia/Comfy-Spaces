@@ -27,6 +27,13 @@ A web-based manager for multiple ComfyUI workspaces with dependency tracking and
 - **Requirements History** — Track and restore requirement changes over time  
 - **Web Interface** — Modern UI for managing spaces, nodes, and dependencies  
 
+
+## what's New?
+
+- Shared model across different workspaces. 
+- Run In app ConfyUI
+- Outputs/File management
+
 ---
 
 ## ⚡ Quick Start
