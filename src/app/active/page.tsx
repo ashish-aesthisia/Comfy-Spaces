@@ -426,6 +426,18 @@ export default function ActivePage() {
     }
   };
 
+  /** Collect all folder paths from model tree so we can start with all collapsed */
+  const getAllFolderPaths = (items: ModelItem[]): string[] => {
+    const paths: string[] = [];
+    for (const item of items) {
+      if ('type' in item && item.type === 'folder') {
+        paths.push(item.path);
+        paths.push(...getAllFolderPaths(item.children));
+      }
+    }
+    return paths;
+  };
+
   const fetchModels = async () => {
     setLoadingModels(true);
     try {
@@ -434,12 +446,16 @@ export default function ActivePage() {
       if (data.error) {
         console.error('Error fetching models:', data.error);
         setModels([]);
+        setCollapsedFolders(new Set());
       } else {
-        setModels(data.structure || []);
+        const structure = data.structure || [];
+        setModels(structure);
+        setCollapsedFolders(new Set(getAllFolderPaths(structure)));
       }
     } catch (err) {
       console.error('Error fetching models:', err);
       setModels([]);
+      setCollapsedFolders(new Set());
     } finally {
       setLoadingModels(false);
     }
