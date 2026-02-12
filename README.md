@@ -1,7 +1,7 @@
 <h1 align="center">🚀 Comfy Spaces</h1>
 
 <p align="center">
-A web-based manager for multiple ComfyUI workspaces with dependency tracking and custom node installation.
+Run your ComfyUI in clean, isolated workspaces with smart custom-node checks — so broken nodes don’t crash, conflict with, or break your main setup anymore.
 </p>
 
 <p align="center">
