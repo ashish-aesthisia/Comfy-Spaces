@@ -1379,7 +1379,7 @@ export default function ActivePage() {
         ) : (
           <Grid gutter="md" style={{ height: '600px' }}>
             {/* Left Column: Diff View */}
-            <Grid.Col span={8}>
+            <Grid.Col span={8} style={{ height: '600px', display: 'flex', flexDirection: 'column' }}>
               <Stack gap="md" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
                 {loadingChanges ? (
                   <Text c="dimmed" ta="center" py="xl">Loading changes...</Text>
@@ -1412,9 +1412,10 @@ export default function ActivePage() {
                         fontFamily: 'monospace',
                         fontSize: '12px',
                         lineHeight: '1.6',
+                        overflow: 'hidden',
                       }}
                     >
-                      <ScrollArea style={{ flex: 1, height: '100%' }}>
+                      <ScrollArea h="100%" style={{ flex: 1 }}>
                         {changesDiff?.diff?.map((item: any, idx: number) => {
                           let bgColor = 'transparent';
                           let borderLeft = 'none';
@@ -1481,11 +1482,11 @@ export default function ActivePage() {
             </Grid.Col>
 
             {/* Right Column: History List */}
-            <Grid.Col span={4}>
+            <Grid.Col span={4} style={{ height: '600px', display: 'flex', flexDirection: 'column' }}>
               <Stack gap="xs" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
                 <Text size="sm" fw={600} c="#ffffff" style={{ flexShrink: 0 }}>History Entries</Text>
                 <Divider style={{ flexShrink: 0 }} />
-                <ScrollArea style={{ flex: 1, minHeight: 0 }}>
+                <ScrollArea h="100%" style={{ flex: 1 }}>
                   <Stack gap="xs">
                     {requirementsHistory.map((entry) => {
                       const title = entry.type === 'node_install' && entry.nodeName
