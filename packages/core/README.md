@@ -8,12 +8,12 @@ Core library for ComfyUI space management and containerization.
 npm install @comfy-spaces/core
 ```
 
-For local development with Everscene:
+For local development with a file dependency:
 
 ```json
 {
   "dependencies": {
-    "@comfy-spaces/core": "file:../../Comfy-Spaces/packages/core"
+    "@comfy-spaces/core": "file:../path/to/Comfy-Spaces/packages/core"
   }
 }
 ```

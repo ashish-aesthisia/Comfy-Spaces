@@ -4,7 +4,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import type { SpaceConfig } from '../types';
 import type { BuildOptions, BuildResult } from './types';
-import { generateDockerfile } from './dockerfile';
+import { generateDockerfile } from './generator';
 
 export async function buildImage(
   config: SpaceConfig,
