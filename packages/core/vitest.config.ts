@@ -4,7 +4,5 @@ export default defineConfig({
   test: {
     environment: 'node',
   },
-  css: {
-    postcss: false,
-  },
+  css: false,
 });

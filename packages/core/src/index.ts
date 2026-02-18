@@ -1,1 +1,1 @@
-export type { SpaceConfig, SpaceNode, SpaceMetadata } from './types';
+export type { SpaceConfig, SpaceNode, SpaceMetadata } from './types.js';

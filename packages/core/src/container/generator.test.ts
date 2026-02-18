@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { generateDockerfile } from './generator';
-import type { SpaceConfig } from '../types';
+import { generateDockerfile } from './generator.js';
+import type { SpaceConfig } from '../types.js';
 
 describe('generateDockerfile', () => {
   const minimalConfig: SpaceConfig = {

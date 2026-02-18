@@ -1,3 +1,3 @@
-export { generateDockerfile } from './generator';
-export { buildImage } from './build';
-export type { DockerfileOptions, BuildOptions, BuildResult } from './types';
+export { generateDockerfile } from './generator.js';
+export { buildImage } from './build.js';
+export type { DockerfileOptions, BuildOptions, BuildResult } from './types.js';

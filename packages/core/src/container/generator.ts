@@ -1,5 +1,5 @@
-import type { SpaceConfig } from "../types";
-import type { DockerfileOptions } from "./types";
+import type { SpaceConfig } from "../types.js";
+import type { DockerfileOptions } from "./types.js";
 
 export function generateDockerfile(
   config: SpaceConfig,
