@@ -1,0 +1,42 @@
+{
+  "name": "@comfy-spaces/core",
+  "version": "0.1.0",
+  "description": "Core library for ComfyUI space management and containerization",
+  "main": "dist/cjs/index.js",
+  "module": "dist/esm/index.js",
+  "types": "dist/types/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/esm/index.js",
+      "require": "./dist/cjs/index.js",
+      "types": "./dist/types/index.d.ts"
+    },
+    "./container": {
+      "import": "./dist/esm/container/index.js",
+      "require": "./dist/cjs/container/index.js",
+      "types": "./dist/types/container/index.d.ts"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "npm run clean && tsc -p tsconfig.esm.json && tsc -p tsconfig.cjs.json",
+    "clean": "rm -rf dist",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "keywords": [
+    "comfyui",
+    "docker",
+    "containerization",
+    "ai"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^20",
+    "typescript": "^5",
+    "vitest": "^2.1.8"
+  }
+}
